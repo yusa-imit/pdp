@@ -3,6 +3,7 @@ import {
   handleListJobs,
   handleGetJob,
   handleCreateJob,
+  handleUpdateJob,
   handleDeleteJob,
   handlePauseJob,
   handleResumeJob,
@@ -37,6 +38,9 @@ export function startServer(ctx: AppContext) {
       const jobMatch = pathname.match(/^\/jobs\/(\d+)$/);
       if (method === "GET" && jobMatch) {
         return handleGetJob(ctx, Number(jobMatch[1]));
+      }
+      if (method === "PATCH" && jobMatch) {
+        return handleUpdateJob(ctx, Number(jobMatch[1]), req);
       }
       if (method === "DELETE" && jobMatch) {
         return handleDeleteJob(ctx, Number(jobMatch[1]));

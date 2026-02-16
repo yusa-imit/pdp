@@ -115,6 +115,39 @@ export async function createJobInDB(
   return job;
 }
 
+export async function updateJobInDB(
+  ctx: AppContext,
+  job: CronJob,
+  updates: Partial<{ name: string; expression: string; prompt: string; cwd: string; model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string }>
+): Promise<CronJob> {
+  const needsReschedule = updates.expression && updates.expression !== job.expression;
+
+  if (updates.name !== undefined) job.name = updates.name;
+  if (updates.expression !== undefined) job.expression = updates.expression;
+  if (updates.prompt !== undefined) job.prompt = updates.prompt;
+  if (updates.cwd !== undefined) job.cwd = updates.cwd;
+  if (updates.model !== undefined) job.model = updates.model;
+  if (updates.permissionMode !== undefined) job.permissionMode = updates.permissionMode;
+  if (updates.maxBudget !== undefined) job.maxBudget = updates.maxBudget;
+  if (updates.timeoutMs !== undefined) job.timeoutMs = updates.timeoutMs;
+  if (updates.allowedTools !== undefined) job.allowedTools = updates.allowedTools;
+  if (updates.appendSystemPrompt !== undefined) job.appendSystemPrompt = updates.appendSystemPrompt;
+
+  await ctx.db.run(
+    `UPDATE jobs SET name = ?, expression = ?, prompt = ?, cwd = ?, model = ?, permission_mode = ?, max_budget = ?, timeout_ms = ?, allowed_tools = ?, append_system_prompt = ? WHERE id = ?`,
+    job.name, job.expression, job.prompt, job.cwd,
+    job.model, job.permissionMode, job.maxBudget, job.timeoutMs,
+    JSON.stringify(job.allowedTools), job.appendSystemPrompt, job.id
+  );
+
+  if (needsReschedule) {
+    job.instance.stop();
+    job.instance = new Cron(job.expression, () => runJob(ctx, job));
+  }
+
+  return job;
+}
+
 export async function deleteJobFromDB(ctx: AppContext, id: number): Promise<void> {
   await ctx.db.run("DELETE FROM runs WHERE job_id = ?", id);
   await ctx.db.run("DELETE FROM jobs WHERE id = ?", id);

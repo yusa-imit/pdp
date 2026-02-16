@@ -6,6 +6,7 @@ import {
   getJob,
   jobToJSON,
   createJobInDB,
+  updateJobInDB,
   deleteJobFromDB,
   removeJob,
   pauseJob,
@@ -48,6 +49,25 @@ export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Re
 
   console.log(`Job created: "${job.name}" (id=${job.id}) [${job.expression}]`);
   return json(await jobToJSON(ctx, job), 201);
+}
+
+export async function handleUpdateJob(ctx: AppContext, id: number, req: Request): Promise<Response> {
+  const job = getJob(ctx, id);
+  if (!job) return json({ error: "Job not found" }, 404);
+
+  const body = await req.json();
+
+  if (body.expression) {
+    try {
+      new Cron(body.expression, { paused: true }, () => {});
+    } catch {
+      return json({ error: "Invalid cron expression" }, 400);
+    }
+  }
+
+  const updated = await updateJobInDB(ctx, job, body);
+  console.log(`Job updated: "${updated.name}" (id=${id})`);
+  return json(await jobToJSON(ctx, updated));
 }
 
 export async function handleDeleteJob(ctx: AppContext, id: number): Promise<Response> {
