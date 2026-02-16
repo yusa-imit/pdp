@@ -24,7 +24,7 @@ export function startServer(ctx: AppContext) {
       const method = req.method;
 
       if (method === "GET" && pathname === "/health") {
-        return handleHealth(ctx);
+        return await handleHealth(ctx);
       }
 
       if (method === "GET" && pathname === "/jobs") {

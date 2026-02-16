@@ -31,25 +31,36 @@ async function jsonBody(res: Response) {
   return res.json();
 }
 
+const defaultOpts = {
+  model: "sonnet",
+  permissionMode: "bypassPermissions",
+  maxBudget: null,
+  timeoutMs: 60000,
+  allowedTools: [] as string[],
+  appendSystemPrompt: "",
+  sessionLimitThreshold: 90,
+  dailyBudgetUsd: null as number | null,
+};
+
 describe("GET /health", () => {
-  test("returns ok with zero jobs", () => {
-    const res = handleHealth(ctx);
+  test("returns ok with zero jobs", async () => {
+    const res = await handleHealth(ctx);
     expect(res.status).toBe(200);
-    return jsonBody(res).then((body) => {
-      expect(body.status).toBe("ok");
-      expect(body.jobs).toBe(0);
-      expect(body.running).toBe(0);
-    });
+    const body = await jsonBody(res);
+    expect(body.status).toBe("ok");
+    expect(body.jobs).toBe(0);
+    expect(body.running).toBe(0);
+    expect(body.dailyUsage).toBe(0);
   });
 
   test("counts jobs correctly", async () => {
     await createJobInDB(
       ctx,
       { name: "j1", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
-    const res = handleHealth(ctx);
+    const res = await handleHealth(ctx);
     const body = await jsonBody(res);
     expect(body.jobs).toBe(1);
     expect(body.running).toBe(0);
@@ -76,6 +87,68 @@ describe("POST /jobs", () => {
     expect(body.name).toBe("new-job");
     expect(body.expression).toBe("*/10 * * * *");
     expect(body.id).toBeGreaterThan(0);
+    expect(body.sessionLimitThreshold).toBe(90);
+    expect(body.dailyBudgetUsd).toBeNull();
+  });
+
+  test("creates a job with session limit fields", async () => {
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "budget-job",
+        expression: "*/10 * * * *",
+        prompt: "do things",
+        cwd: "/tmp",
+        sessionLimitThreshold: 80,
+        dailyBudgetUsd: 50,
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleCreateJob(ctx, req);
+    expect(res.status).toBe(201);
+
+    const body = await jsonBody(res);
+    expect(body.sessionLimitThreshold).toBe(80);
+    expect(body.dailyBudgetUsd).toBe(50);
+  });
+
+  test("returns 400 for invalid sessionLimitThreshold", async () => {
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "bad-threshold",
+        expression: "*/10 * * * *",
+        prompt: "p",
+        cwd: "/tmp",
+        sessionLimitThreshold: 150,
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleCreateJob(ctx, req);
+    expect(res.status).toBe(400);
+    const body = await jsonBody(res);
+    expect(body.error).toContain("sessionLimitThreshold");
+  });
+
+  test("returns 400 for negative dailyBudgetUsd", async () => {
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "bad-budget",
+        expression: "*/10 * * * *",
+        prompt: "p",
+        cwd: "/tmp",
+        dailyBudgetUsd: -10,
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleCreateJob(ctx, req);
+    expect(res.status).toBe(400);
+    const body = await jsonBody(res);
+    expect(body.error).toContain("dailyBudgetUsd");
   });
 
   test("returns 400 for missing fields", async () => {
@@ -120,7 +193,7 @@ describe("GET /jobs", () => {
     await createJobInDB(
       ctx,
       { name: "j1", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     const res = await handleListJobs(ctx);
@@ -140,7 +213,7 @@ describe("GET /jobs/:id", () => {
     const job = await createJobInDB(
       ctx,
       { name: "detail", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     const res = await handleGetJob(ctx, job.id);
@@ -162,7 +235,7 @@ describe("DELETE /jobs/:id", () => {
     const job = await createJobInDB(
       ctx,
       { name: "to-delete", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     const res = await handleDeleteJob(ctx, job.id);
@@ -176,7 +249,7 @@ describe("POST /jobs/:id/pause & resume", () => {
     const job = await createJobInDB(
       ctx,
       { name: "toggle", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     const pauseRes = handlePauseJob(ctx, job.id);
@@ -202,7 +275,7 @@ describe("POST /jobs/:id/trigger", () => {
     const job = await createJobInDB(
       ctx,
       { name: "busy", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
     job.isRunning = true;
 
@@ -222,7 +295,7 @@ describe("GET /jobs/:id/runs", () => {
     const job = await createJobInDB(
       ctx,
       { name: "no-runs", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     const req = new Request(`http://localhost/jobs/${job.id}/runs`);
@@ -233,17 +306,17 @@ describe("GET /jobs/:id/runs", () => {
     expect(body.total).toBe(0);
   });
 
-  test("returns runs with pagination", async () => {
+  test("returns runs with pagination and cost data", async () => {
     const job = await createJobInDB(
       ctx,
       { name: "with-runs", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     for (let i = 0; i < 3; i++) {
       await ctx.db.run(
-        "INSERT INTO runs (job_id, started_at, status) VALUES (?, ?, 'success')",
-        job.id, new Date(Date.now() - i * 60000).toISOString()
+        "INSERT INTO runs (job_id, started_at, status, cost_usd, input_tokens, output_tokens) VALUES (?, ?, 'success', ?, ?, ?)",
+        job.id, new Date(Date.now() - i * 60000).toISOString(), 0.1 * (i + 1), 1000 * (i + 1), 500 * (i + 1)
       );
     }
 
@@ -254,5 +327,8 @@ describe("GET /jobs/:id/runs", () => {
     expect(body.runs).toHaveLength(2);
     expect(body.total).toBe(3);
     expect(body.limit).toBe(2);
+    expect(body.runs[0].costUsd).toBeDefined();
+    expect(body.runs[0].inputTokens).toBeDefined();
+    expect(body.runs[0].outputTokens).toBeDefined();
   });
 });

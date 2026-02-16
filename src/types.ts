@@ -13,6 +13,8 @@ export interface CronJob {
   timeoutMs: number;
   allowedTools: string[];
   appendSystemPrompt: string;
+  sessionLimitThreshold: number;
+  dailyBudgetUsd: number | null;
   instance: Cron;
   createdAt: string;
   isRunning: boolean;
@@ -29,6 +31,8 @@ export interface CreateJobBody {
   timeoutMs?: number;
   allowedTools?: string[];
   appendSystemPrompt?: string;
+  sessionLimitThreshold?: number;
+  dailyBudgetUsd?: number | null;
 }
 
 export interface JobRow {
@@ -43,6 +47,8 @@ export interface JobRow {
   timeout_ms: number;
   allowed_tools: string;
   append_system_prompt: string;
+  session_limit_threshold: number;
+  daily_budget_usd: number | null;
   created_at: string;
 }
 
@@ -56,10 +62,25 @@ export interface RunRow {
   log_file: string | null;
   error: string | null;
   status: string;
+  cost_usd: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
 }
 
 export interface AppContext {
   db: Db;
   jobs: Map<number, CronJob>;
   logsDir: string;
+}
+
+export interface ClaudeJsonResult {
+  result: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+  duration_api_ms: number;
+  is_error: boolean;
+  session_id: string;
+  num_turns: number;
 }

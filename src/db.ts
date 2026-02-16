@@ -51,6 +51,8 @@ export function createDb(dbPath: string): Db {
         timeout_ms    INTEGER NOT NULL DEFAULT 600000,
         allowed_tools TEXT NOT NULL DEFAULT '[]',
         append_system_prompt TEXT NOT NULL DEFAULT '',
+        session_limit_threshold INTEGER NOT NULL DEFAULT 90,
+        daily_budget_usd DOUBLE,
         created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp
       )
     `);
@@ -65,9 +67,24 @@ export function createDb(dbPath: string): Db {
         duration_ms INTEGER,
         log_file    VARCHAR,
         error       TEXT,
-        status      VARCHAR NOT NULL DEFAULT 'running'
+        status      VARCHAR NOT NULL DEFAULT 'running',
+        cost_usd    DOUBLE,
+        input_tokens INTEGER,
+        output_tokens INTEGER
       )
     `);
+
+    // Migrations for existing databases
+    const migrations = [
+      "ALTER TABLE jobs ADD COLUMN session_limit_threshold INTEGER NOT NULL DEFAULT 90",
+      "ALTER TABLE jobs ADD COLUMN daily_budget_usd DOUBLE",
+      "ALTER TABLE runs ADD COLUMN cost_usd DOUBLE",
+      "ALTER TABLE runs ADD COLUMN input_tokens INTEGER",
+      "ALTER TABLE runs ADD COLUMN output_tokens INTEGER",
+    ];
+    for (const sql of migrations) {
+      try { await run(sql); } catch { /* column already exists */ }
+    }
   }
 
   function close(): Promise<void> {

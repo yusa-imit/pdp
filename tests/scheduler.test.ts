@@ -42,12 +42,25 @@ function makeCronJob(overrides: Partial<CronJob> = {}): CronJob {
     timeoutMs: 60000,
     allowedTools: [],
     appendSystemPrompt: "",
+    sessionLimitThreshold: 90,
+    dailyBudgetUsd: null,
     instance: null as unknown as Cron,
     createdAt: new Date().toISOString(),
     isRunning: false,
     ...overrides,
   };
 }
+
+const defaultOpts = {
+  model: "sonnet",
+  permissionMode: "bypassPermissions",
+  maxBudget: null,
+  timeoutMs: 60000,
+  allowedTools: [] as string[],
+  appendSystemPrompt: "",
+  sessionLimitThreshold: 90,
+  dailyBudgetUsd: null as number | null,
+};
 
 describe("in-memory job management", () => {
   test("scheduleJob adds job to map and creates cron instance", () => {
@@ -114,12 +127,13 @@ describe("DB persistence", () => {
       ctx,
       { name: "db-job", expression: "*/5 * * * *", prompt: "hello", cwd: "/tmp" },
       {
-        model: "sonnet",
-        permissionMode: "bypassPermissions",
+        ...defaultOpts,
         maxBudget: null,
         timeoutMs: 300000,
         allowedTools: ["Read"],
         appendSystemPrompt: "extra",
+        sessionLimitThreshold: 80,
+        dailyBudgetUsd: 50,
       }
     );
 
@@ -127,6 +141,8 @@ describe("DB persistence", () => {
     expect(job.name).toBe("db-job");
     expect(job.expression).toBe("*/5 * * * *");
     expect(job.allowedTools).toEqual(["Read"]);
+    expect(job.sessionLimitThreshold).toBe(80);
+    expect(job.dailyBudgetUsd).toBe(50);
     expect(ctx.jobs.has(job.id)).toBe(true);
   });
 
@@ -134,7 +150,7 @@ describe("DB persistence", () => {
     const job = await createJobInDB(
       ctx,
       { name: "to-delete", expression: "0 * * * *", prompt: "x", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     // Insert a run for this job
@@ -155,10 +171,10 @@ describe("DB persistence", () => {
   test("loadJobs restores jobs from DB into memory", async () => {
     // Create a job in DB directly
     await ctx.db.run(
-      `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt, session_limit_threshold, daily_budget_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       "loaded-job", "30 2 * * *", "do stuff", "/tmp",
-      "sonnet", "bypassPermissions", null, 600000, '["Read","Write"]', ""
+      "sonnet", "bypassPermissions", null, 600000, '["Read","Write"]', "", 85, 100
     );
 
     // Clear in-memory state
@@ -171,6 +187,8 @@ describe("DB persistence", () => {
     expect(job.name).toBe("loaded-job");
     expect(job.expression).toBe("30 2 * * *");
     expect(job.allowedTools).toEqual(["Read", "Write"]);
+    expect(job.sessionLimitThreshold).toBe(85);
+    expect(job.dailyBudgetUsd).toBe(100);
   });
 });
 
@@ -179,7 +197,7 @@ describe("jobToJSON", () => {
     const job = await createJobInDB(
       ctx,
       { name: "json-test", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     const data = await jobToJSON(ctx, job);
@@ -191,18 +209,21 @@ describe("jobToJSON", () => {
     expect(data.lastRun).toBeNull();
     expect(data.runCount).toBe(0);
     expect(data.nextRun).toBeDefined();
+    expect(data.sessionLimitThreshold).toBe(90);
+    expect(data.dailyBudgetUsd).toBeNull();
+    expect(data.dailyUsage).toBe(0);
   });
 
-  test("serializes job with a run", async () => {
+  test("serializes job with a run including cost data", async () => {
     const job = await createJobInDB(
       ctx,
       { name: "json-test-2", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
-      { model: "sonnet", permissionMode: "bypassPermissions", maxBudget: null, timeoutMs: 60000, allowedTools: [], appendSystemPrompt: "" }
+      defaultOpts
     );
 
     await ctx.db.run(
-      "INSERT INTO runs (job_id, started_at, finished_at, exit_code, duration_ms, log_file, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      job.id, "2025-01-01T00:00:00.000Z", "2025-01-01T00:01:00.000Z", 0, 60000, "/tmp/test.log", "success"
+      "INSERT INTO runs (job_id, started_at, finished_at, exit_code, duration_ms, log_file, status, cost_usd, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      job.id, new Date().toISOString(), new Date().toISOString(), 0, 60000, "/tmp/test.log", "success", 0.25, 5000, 2000
     );
 
     const data = await jobToJSON(ctx, job);
@@ -211,5 +232,9 @@ describe("jobToJSON", () => {
     expect(data.lastRun).not.toBeNull();
     expect(data.lastRun!.exitCode).toBe(0);
     expect(data.lastRun!.status).toBe("success");
+    expect(data.lastRun!.costUsd).toBe(0.25);
+    expect(data.lastRun!.inputTokens).toBe(5000);
+    expect(data.lastRun!.outputTokens).toBe(2000);
+    expect(data.dailyUsage).toBe(0.25);
   });
 });

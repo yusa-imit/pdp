@@ -1,10 +1,11 @@
-import type { AppContext, CronJob } from "../types";
+import type { AppContext, CronJob, ClaudeJsonResult } from "../types";
+import { shouldSkipForUsage } from "./usage";
 
 export function buildClaudeArgs(job: CronJob): string[] {
   const args = [
     "claude",
     "-p",
-    "--output-format", "text",
+    "--output-format", "json",
     "--model", job.model,
     "--permission-mode", job.permissionMode,
     "--verbose",
@@ -26,9 +27,29 @@ export function buildClaudeArgs(job: CronJob): string[] {
   return args;
 }
 
+export function parseClaudeJson(stdout: string): ClaudeJsonResult | null {
+  try {
+    const parsed = JSON.parse(stdout);
+    return parsed as ClaudeJsonResult;
+  } catch {
+    return null;
+  }
+}
+
 export async function runJob(ctx: AppContext, job: CronJob) {
   if (job.isRunning) {
     console.log(`[SKIP] Job "${job.name}" (id=${job.id}) is already running, skipping`);
+    return;
+  }
+
+  // Check usage threshold before running
+  const usageCheck = await shouldSkipForUsage(ctx, job);
+  if (usageCheck.skip) {
+    console.log(`[SKIP] Job "${job.name}" (id=${job.id}) — ${usageCheck.reason}`);
+    await ctx.db.run(
+      "INSERT INTO runs (job_id, started_at, finished_at, duration_ms, status, error) VALUES (?, ?, ?, 0, 'skipped', ?)",
+      job.id, new Date().toISOString(), new Date().toISOString(), usageCheck.reason
+    );
     return;
   }
 
@@ -53,6 +74,9 @@ export async function runJob(ctx: AppContext, job: CronJob) {
 
   let exitCode: number | null = null;
   let error: string | null = null;
+  let costUsd: number | null = null;
+  let inputTokens: number | null = null;
+  let outputTokens: number | null = null;
 
   try {
     const args = buildClaudeArgs(job);
@@ -77,12 +101,15 @@ export async function runJob(ctx: AppContext, job: CronJob) {
       env: { ...process.env },
     });
 
+    // Buffer stdout (JSON output comes at process exit)
+    const stdoutChunks: Uint8Array[] = [];
     const stdoutReader = (async () => {
       for await (const chunk of proc.stdout) {
-        logSink.write(chunk);
+        stdoutChunks.push(new Uint8Array(chunk));
       }
     })();
 
+    // Stream stderr to log in real-time (--verbose progress goes here)
     const stderrReader = (async () => {
       for await (const chunk of proc.stderr) {
         logSink.write(new TextEncoder().encode(`[stderr] `));
@@ -109,6 +136,24 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     }
 
     await Promise.allSettled([stdoutReader, stderrReader]);
+
+    // Parse JSON stdout
+    const stdoutBuf = Buffer.concat(stdoutChunks);
+    const stdoutStr = new TextDecoder().decode(stdoutBuf);
+    const claudeResult = parseClaudeJson(stdoutStr);
+
+    if (claudeResult) {
+      costUsd = claudeResult.cost_usd ?? null;
+      inputTokens = claudeResult.input_tokens ?? null;
+      outputTokens = claudeResult.output_tokens ?? null;
+      // Write the result text to the log
+      logSink.write(`\n${"=".repeat(60)}\n[RESULT]\n${claudeResult.result}\n`);
+      console.log(`  cost=$${costUsd?.toFixed(4)} in=${inputTokens} out=${outputTokens}`);
+    } else if (stdoutStr.trim()) {
+      // Fallback: write raw stdout if JSON parsing failed
+      logSink.write(`\n${"=".repeat(60)}\n[RAW OUTPUT]\n${stdoutStr}\n`);
+    }
+
     logSink.end();
   } catch (err) {
     error = String(err);
@@ -120,8 +165,8 @@ export async function runJob(ctx: AppContext, job: CronJob) {
   const status = error ? "failed" : exitCode === 0 ? "success" : "failed";
 
   await ctx.db.run(
-    `UPDATE runs SET finished_at = ?, exit_code = ?, duration_ms = ?, error = ?, status = ? WHERE id = ?`,
-    finishedAt.toISOString(), exitCode, durationMs, error, status, runId
+    `UPDATE runs SET finished_at = ?, exit_code = ?, duration_ms = ?, error = ?, status = ?, cost_usd = ?, input_tokens = ?, output_tokens = ? WHERE id = ?`,
+    finishedAt.toISOString(), exitCode, durationMs, error, status, costUsd, inputTokens, outputTokens, runId
   );
 
   job.isRunning = false;

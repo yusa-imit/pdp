@@ -38,6 +38,15 @@ export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Re
     return json({ error: "Invalid cron expression" }, 400);
   }
 
+  if (body.sessionLimitThreshold !== undefined) {
+    if (body.sessionLimitThreshold < 0 || body.sessionLimitThreshold > 100) {
+      return json({ error: "sessionLimitThreshold must be between 0 and 100" }, 400);
+    }
+  }
+  if (body.dailyBudgetUsd !== undefined && body.dailyBudgetUsd !== null && body.dailyBudgetUsd <= 0) {
+    return json({ error: "dailyBudgetUsd must be positive" }, 400);
+  }
+
   const job = await createJobInDB(ctx, body, {
     model: body.model || "sonnet",
     permissionMode: body.permissionMode || "bypassPermissions",
@@ -45,6 +54,8 @@ export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Re
     timeoutMs: body.timeoutMs || 10 * 60 * 1000,
     allowedTools: body.allowedTools || [],
     appendSystemPrompt: body.appendSystemPrompt || "",
+    sessionLimitThreshold: body.sessionLimitThreshold ?? 90,
+    dailyBudgetUsd: body.dailyBudgetUsd ?? null,
   });
 
   console.log(`Job created: "${job.name}" (id=${job.id}) [${job.expression}]`);
@@ -63,6 +74,15 @@ export async function handleUpdateJob(ctx: AppContext, id: number, req: Request)
     } catch {
       return json({ error: "Invalid cron expression" }, 400);
     }
+  }
+
+  if (body.sessionLimitThreshold !== undefined) {
+    if (body.sessionLimitThreshold < 0 || body.sessionLimitThreshold > 100) {
+      return json({ error: "sessionLimitThreshold must be between 0 and 100" }, 400);
+    }
+  }
+  if (body.dailyBudgetUsd !== undefined && body.dailyBudgetUsd !== null && body.dailyBudgetUsd <= 0) {
+    return json({ error: "dailyBudgetUsd must be positive" }, 400);
   }
 
   const updated = await updateJobInDB(ctx, job, body);

@@ -1,5 +1,6 @@
 import { Cron } from "croner";
 import { runJob } from "./runner";
+import { getDailyUsage } from "./usage";
 import type { AppContext, CronJob, JobRow, RunRow } from "../types";
 
 // --- Accessors ---
@@ -47,6 +48,7 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
     "SELECT count(*)::INTEGER as cnt FROM runs WHERE job_id = ?",
     job.id
   );
+  const dailyUsage = await getDailyUsage(ctx);
 
   return {
     id: job.id,
@@ -60,6 +62,8 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
     timeoutMs: job.timeoutMs,
     allowedTools: job.allowedTools,
     appendSystemPrompt: job.appendSystemPrompt || null,
+    sessionLimitThreshold: job.sessionLimitThreshold,
+    dailyBudgetUsd: job.dailyBudgetUsd,
     scheduled: !job.instance.isStopped(),
     isRunning: job.isRunning,
     nextRun: job.instance.nextRun()?.toISOString() ?? null,
@@ -73,9 +77,13 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
           logFile: lastRun.log_file,
           error: lastRun.error,
           status: lastRun.status,
+          costUsd: lastRun.cost_usd,
+          inputTokens: lastRun.input_tokens,
+          outputTokens: lastRun.output_tokens,
         }
       : null,
     runCount: runCount?.cnt ?? 0,
+    dailyUsage,
     createdAt: job.createdAt,
   };
 }
@@ -85,14 +93,15 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
 export async function createJobInDB(
   ctx: AppContext,
   body: { name: string; expression: string; prompt: string; cwd: string },
-  opts: { model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string }
+  opts: { model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string; sessionLimitThreshold: number; dailyBudgetUsd: number | null }
 ): Promise<CronJob> {
   await ctx.db.run(
-    `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt, session_limit_threshold, daily_budget_usd)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     body.name, body.expression, body.prompt, body.cwd,
     opts.model, opts.permissionMode, opts.maxBudget, opts.timeoutMs,
-    JSON.stringify(opts.allowedTools), opts.appendSystemPrompt
+    JSON.stringify(opts.allowedTools), opts.appendSystemPrompt,
+    opts.sessionLimitThreshold, opts.dailyBudgetUsd
   );
 
   const row = await ctx.db.get<{ id: number; created_at: string }>(
@@ -118,7 +127,7 @@ export async function createJobInDB(
 export async function updateJobInDB(
   ctx: AppContext,
   job: CronJob,
-  updates: Partial<{ name: string; expression: string; prompt: string; cwd: string; model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string }>
+  updates: Partial<{ name: string; expression: string; prompt: string; cwd: string; model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string; sessionLimitThreshold: number; dailyBudgetUsd: number | null }>
 ): Promise<CronJob> {
   const needsReschedule = updates.expression && updates.expression !== job.expression;
 
@@ -132,12 +141,15 @@ export async function updateJobInDB(
   if (updates.timeoutMs !== undefined) job.timeoutMs = updates.timeoutMs;
   if (updates.allowedTools !== undefined) job.allowedTools = updates.allowedTools;
   if (updates.appendSystemPrompt !== undefined) job.appendSystemPrompt = updates.appendSystemPrompt;
+  if (updates.sessionLimitThreshold !== undefined) job.sessionLimitThreshold = updates.sessionLimitThreshold;
+  if (updates.dailyBudgetUsd !== undefined) job.dailyBudgetUsd = updates.dailyBudgetUsd;
 
   await ctx.db.run(
-    `UPDATE jobs SET name = ?, expression = ?, prompt = ?, cwd = ?, model = ?, permission_mode = ?, max_budget = ?, timeout_ms = ?, allowed_tools = ?, append_system_prompt = ? WHERE id = ?`,
+    `UPDATE jobs SET name = ?, expression = ?, prompt = ?, cwd = ?, model = ?, permission_mode = ?, max_budget = ?, timeout_ms = ?, allowed_tools = ?, append_system_prompt = ?, session_limit_threshold = ?, daily_budget_usd = ? WHERE id = ?`,
     job.name, job.expression, job.prompt, job.cwd,
     job.model, job.permissionMode, job.maxBudget, job.timeoutMs,
-    JSON.stringify(job.allowedTools), job.appendSystemPrompt, job.id
+    JSON.stringify(job.allowedTools), job.appendSystemPrompt,
+    job.sessionLimitThreshold, job.dailyBudgetUsd, job.id
   );
 
   if (needsReschedule) {
@@ -171,6 +183,8 @@ export async function loadJobs(ctx: AppContext): Promise<void> {
       timeoutMs: row.timeout_ms,
       allowedTools: JSON.parse(row.allowed_tools || "[]"),
       appendSystemPrompt: row.append_system_prompt,
+      sessionLimitThreshold: row.session_limit_threshold,
+      dailyBudgetUsd: row.daily_budget_usd,
       instance: null as unknown as Cron,
       createdAt: row.created_at,
       isRunning: false,
