@@ -1,4 +1,5 @@
 import type { Cron } from "croner";
+import type { Db } from "./db";
 
 export interface CronJob {
   id: number;
@@ -55,4 +56,10 @@ export interface RunRow {
   log_file: string | null;
   error: string | null;
   status: string;
+}
+
+export interface AppContext {
+  db: Db;
+  jobs: Map<number, CronJob>;
+  logsDir: string;
 }

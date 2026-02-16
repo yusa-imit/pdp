@@ -1,7 +1,4 @@
-import { run, get } from "../db";
-import type { CronJob } from "../types";
-
-const LOGS_DIR = process.env.LOGS_DIR || "./data/logs";
+import type { AppContext, CronJob } from "../types";
 
 export function buildClaudeArgs(job: CronJob): string[] {
   const args = [
@@ -29,7 +26,7 @@ export function buildClaudeArgs(job: CronJob): string[] {
   return args;
 }
 
-export async function runJob(job: CronJob) {
+export async function runJob(ctx: AppContext, job: CronJob) {
   if (job.isRunning) {
     console.log(`[SKIP] Job "${job.name}" (id=${job.id}) is already running, skipping`);
     return;
@@ -38,13 +35,13 @@ export async function runJob(job: CronJob) {
   job.isRunning = true;
   const startedAt = new Date();
   const timestamp = startedAt.toISOString().replace(/[:.]/g, "-");
-  const logFile = `${LOGS_DIR}/job-${job.id}-${timestamp}.log`;
+  const logFile = `${ctx.logsDir}/job-${job.id}-${timestamp}.log`;
 
-  await run(
+  await ctx.db.run(
     "INSERT INTO runs (job_id, started_at, log_file, status) VALUES (?, ?, ?, 'running')",
     job.id, startedAt.toISOString(), logFile
   );
-  const runRow = await get<{ id: number }>(
+  const runRow = await ctx.db.get<{ id: number }>(
     "SELECT max(id) as id FROM runs WHERE job_id = ?", job.id
   );
   const runId = runRow!.id;
@@ -122,7 +119,7 @@ export async function runJob(job: CronJob) {
   const durationMs = finishedAt.getTime() - startedAt.getTime();
   const status = error ? "failed" : exitCode === 0 ? "success" : "failed";
 
-  await run(
+  await ctx.db.run(
     `UPDATE runs SET finished_at = ?, exit_code = ?, duration_ms = ?, error = ?, status = ? WHERE id = ?`,
     finishedAt.toISOString(), exitCode, durationMs, error, status, runId
   );

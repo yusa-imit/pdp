@@ -1,9 +1,9 @@
-import { all, get } from "../db";
 import { json, text } from "../lib/response";
 import { getJob } from "../services/scheduler";
+import type { AppContext } from "../types";
 
-export async function handleGetRuns(id: number, req: Request): Promise<Response> {
-  const job = getJob(id);
+export async function handleGetRuns(ctx: AppContext, id: number, req: Request): Promise<Response> {
+  const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
   const url = new URL(req.url);
@@ -22,8 +22,8 @@ export async function handleGetRuns(id: number, req: Request): Promise<Response>
   query += " ORDER BY started_at DESC LIMIT ? OFFSET ?";
   params.push(limit, offset);
 
-  const rows = await all(query, ...params);
-  const total = await get<{ cnt: number }>(
+  const rows = await ctx.db.all(query, ...params);
+  const total = await ctx.db.get<{ cnt: number }>(
     "SELECT count(*)::INTEGER as cnt FROM runs WHERE job_id = ?", id
   );
 
@@ -45,8 +45,8 @@ export async function handleGetRuns(id: number, req: Request): Promise<Response>
   });
 }
 
-export async function handleGetLog(id: number, req: Request): Promise<Response> {
-  const job = getJob(id);
+export async function handleGetLog(ctx: AppContext, id: number, req: Request): Promise<Response> {
+  const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
   const url = new URL(req.url);
@@ -55,12 +55,12 @@ export async function handleGetLog(id: number, req: Request): Promise<Response> 
   let logPath: string | undefined;
 
   if (runId) {
-    const row = await get<{ log_file: string }>(
+    const row = await ctx.db.get<{ log_file: string }>(
       "SELECT log_file FROM runs WHERE id = ? AND job_id = ?", Number(runId), id
     );
     logPath = row?.log_file;
   } else {
-    const row = await get<{ log_file: string }>(
+    const row = await ctx.db.get<{ log_file: string }>(
       "SELECT log_file FROM runs WHERE job_id = ? ORDER BY started_at DESC LIMIT 1", id
     );
     logPath = row?.log_file;

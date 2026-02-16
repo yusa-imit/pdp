@@ -1,32 +1,29 @@
 import { Cron } from "croner";
-import { all, get, run as dbRun } from "../db";
 import { runJob } from "./runner";
-import type { CronJob, JobRow, RunRow } from "../types";
-
-const jobs = new Map<number, CronJob>();
+import type { AppContext, CronJob, JobRow, RunRow } from "../types";
 
 // --- Accessors ---
 
-export function getJob(id: number): CronJob | undefined {
-  return jobs.get(id);
+export function getJob(ctx: AppContext, id: number): CronJob | undefined {
+  return ctx.jobs.get(id);
 }
 
-export function getAllJobs(): CronJob[] {
-  return [...jobs.values()];
+export function getAllJobs(ctx: AppContext): CronJob[] {
+  return [...ctx.jobs.values()];
 }
 
 // --- Job lifecycle ---
 
-export function scheduleJob(job: CronJob): void {
-  job.instance = new Cron(job.expression, () => runJob(job));
-  jobs.set(job.id, job);
+export function scheduleJob(ctx: AppContext, job: CronJob): void {
+  job.instance = new Cron(job.expression, () => runJob(ctx, job));
+  ctx.jobs.set(job.id, job);
 }
 
-export function removeJob(id: number): CronJob | undefined {
-  const job = jobs.get(id);
+export function removeJob(ctx: AppContext, id: number): CronJob | undefined {
+  const job = ctx.jobs.get(id);
   if (job) {
     job.instance.stop();
-    jobs.delete(id);
+    ctx.jobs.delete(id);
   }
   return job;
 }
@@ -41,12 +38,12 @@ export function resumeJob(job: CronJob): void {
 
 // --- Serialization ---
 
-export async function jobToJSON(job: CronJob) {
-  const lastRun = await get<RunRow>(
+export async function jobToJSON(ctx: AppContext, job: CronJob) {
+  const lastRun = await ctx.db.get<RunRow>(
     "SELECT * FROM runs WHERE job_id = ? ORDER BY started_at DESC LIMIT 1",
     job.id
   );
-  const runCount = await get<{ cnt: number }>(
+  const runCount = await ctx.db.get<{ cnt: number }>(
     "SELECT count(*)::INTEGER as cnt FROM runs WHERE job_id = ?",
     job.id
   );
@@ -86,10 +83,11 @@ export async function jobToJSON(job: CronJob) {
 // --- DB persistence ---
 
 export async function createJobInDB(
+  ctx: AppContext,
   body: { name: string; expression: string; prompt: string; cwd: string },
   opts: { model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string }
 ): Promise<CronJob> {
-  await dbRun(
+  await ctx.db.run(
     `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     body.name, body.expression, body.prompt, body.cwd,
@@ -97,7 +95,7 @@ export async function createJobInDB(
     JSON.stringify(opts.allowedTools), opts.appendSystemPrompt
   );
 
-  const row = await get<{ id: number; created_at: string }>(
+  const row = await ctx.db.get<{ id: number; created_at: string }>(
     "SELECT id, created_at::VARCHAR as created_at FROM jobs ORDER BY id DESC LIMIT 1"
   );
 
@@ -113,17 +111,17 @@ export async function createJobInDB(
     isRunning: false,
   };
 
-  scheduleJob(job);
+  scheduleJob(ctx, job);
   return job;
 }
 
-export async function deleteJobFromDB(id: number): Promise<void> {
-  await dbRun("DELETE FROM runs WHERE job_id = ?", id);
-  await dbRun("DELETE FROM jobs WHERE id = ?", id);
+export async function deleteJobFromDB(ctx: AppContext, id: number): Promise<void> {
+  await ctx.db.run("DELETE FROM runs WHERE job_id = ?", id);
+  await ctx.db.run("DELETE FROM jobs WHERE id = ?", id);
 }
 
-export async function loadJobs(): Promise<void> {
-  const rows = await all<JobRow>(
+export async function loadJobs(ctx: AppContext): Promise<void> {
+  const rows = await ctx.db.all<JobRow>(
     "SELECT *, created_at::VARCHAR as created_at FROM jobs ORDER BY id"
   );
 
@@ -144,7 +142,7 @@ export async function loadJobs(): Promise<void> {
       createdAt: row.created_at,
       isRunning: false,
     };
-    scheduleJob(job);
+    scheduleJob(ctx, job);
     console.log(`  Loaded job: "${job.name}" (id=${job.id}) [${job.expression}]`);
   }
 

@@ -11,20 +11,20 @@ import {
   pauseJob,
   resumeJob,
 } from "../services/scheduler";
-import type { CreateJobBody } from "../types";
+import type { AppContext, CreateJobBody } from "../types";
 
-export async function handleListJobs(): Promise<Response> {
-  const list = await Promise.all(getAllJobs().map(jobToJSON));
+export async function handleListJobs(ctx: AppContext): Promise<Response> {
+  const list = await Promise.all(getAllJobs(ctx).map((j) => jobToJSON(ctx, j)));
   return json({ jobs: list });
 }
 
-export async function handleGetJob(id: number): Promise<Response> {
-  const job = getJob(id);
+export async function handleGetJob(ctx: AppContext, id: number): Promise<Response> {
+  const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
-  return json(await jobToJSON(job));
+  return json(await jobToJSON(ctx, job));
 }
 
-export async function handleCreateJob(req: Request): Promise<Response> {
+export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Response> {
   const body = (await req.json()) as CreateJobBody;
 
   if (!body.name || !body.expression || !body.prompt || !body.cwd) {
@@ -37,7 +37,7 @@ export async function handleCreateJob(req: Request): Promise<Response> {
     return json({ error: "Invalid cron expression" }, 400);
   }
 
-  const job = await createJobInDB(body, {
+  const job = await createJobInDB(ctx, body, {
     model: body.model || "sonnet",
     permissionMode: body.permissionMode || "bypassPermissions",
     maxBudget: body.maxBudget ?? null,
@@ -47,20 +47,20 @@ export async function handleCreateJob(req: Request): Promise<Response> {
   });
 
   console.log(`Job created: "${job.name}" (id=${job.id}) [${job.expression}]`);
-  return json(await jobToJSON(job), 201);
+  return json(await jobToJSON(ctx, job), 201);
 }
 
-export async function handleDeleteJob(id: number): Promise<Response> {
-  const job = removeJob(id);
+export async function handleDeleteJob(ctx: AppContext, id: number): Promise<Response> {
+  const job = removeJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
-  await deleteJobFromDB(id);
+  await deleteJobFromDB(ctx, id);
   console.log(`Job deleted: "${job.name}" (id=${id})`);
   return json({ message: "Job deleted" });
 }
 
-export function handlePauseJob(id: number): Response {
-  const job = getJob(id);
+export function handlePauseJob(ctx: AppContext, id: number): Response {
+  const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
   pauseJob(job);
@@ -68,8 +68,8 @@ export function handlePauseJob(id: number): Response {
   return json({ message: "Job paused", id });
 }
 
-export function handleResumeJob(id: number): Response {
-  const job = getJob(id);
+export function handleResumeJob(ctx: AppContext, id: number): Response {
+  const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
   resumeJob(job);
@@ -77,14 +77,14 @@ export function handleResumeJob(id: number): Response {
   return json({ message: "Job resumed", id });
 }
 
-export function handleTriggerJob(id: number): Response {
-  const job = getJob(id);
+export function handleTriggerJob(ctx: AppContext, id: number): Response {
+  const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
   if (job.isRunning) {
     return json({ error: "Job is already running" }, 409);
   }
 
-  runJob(job);
+  runJob(ctx, job);
   return json({ message: "Job triggered", jobId: id });
 }
