@@ -65,6 +65,27 @@ server.registerTool("create_job", {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 });
 
+server.registerTool("update_job", {
+  title: "Update Job",
+  description: "잡의 설정을 부분 업데이트한다. 변경할 필드만 전달하면 된다. expression 변경 시 cron 스케줄이 자동 재설정된다.",
+  inputSchema: {
+    id: z.number().describe("잡 ID"),
+    name: z.string().optional().describe("잡 이름"),
+    expression: z.string().optional().describe("cron 표현식"),
+    prompt: z.string().optional().describe("Claude Code 프롬프트"),
+    cwd: z.string().optional().describe("실행 디렉토리"),
+    model: z.string().optional().describe("모델"),
+    permissionMode: z.string().optional().describe("권한 모드"),
+    maxBudget: z.number().nullable().optional().describe("최대 API 비용 USD (null이면 제한 없음)"),
+    timeoutMs: z.number().optional().describe("타임아웃 ms"),
+    allowedTools: z.array(z.string()).optional().describe("허용 도구 목록"),
+    appendSystemPrompt: z.string().optional().describe("추가 시스템 프롬프트"),
+  },
+}, async ({ id, ...updates }) => {
+  const data = await api(`/jobs/${id}`, { method: "PATCH", body: JSON.stringify(updates) });
+  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+
 server.registerTool("delete_job", {
   title: "Delete Job",
   description: "잡을 삭제한다. 스케줄이 중지되고 실행 이력도 삭제된다.",

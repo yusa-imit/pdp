@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun test)",
+      "Bash(bun build *)",
+      "Bash(curl *localhost*)",
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(launchctl list *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)"
+    ]
+  }
+}

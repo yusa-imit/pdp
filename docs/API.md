@@ -131,6 +131,49 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 
 ---
 
+## PATCH /jobs/:id
+
+잡의 설정을 부분 업데이트한다. 변경할 필드만 전달하면 된다.
+`expression`을 변경하면 cron 스케줄이 자동으로 재설정된다.
+
+**Request Body** — 변경할 필드만 포함
+
+```json
+{
+  "maxBudget": null,
+  "timeoutMs": 1800000
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| name | string | 잡 이름 |
+| expression | string | cron 표현식 (변경 시 스케줄 재설정) |
+| prompt | string | Claude Code 프롬프트 |
+| cwd | string | 실행 디렉토리 |
+| model | string | 사용 모델 |
+| permissionMode | string | 권한 모드 |
+| maxBudget | number \| null | API 비용 제한 (null = 무제한) |
+| timeoutMs | number | 타임아웃 (ms) |
+| allowedTools | string[] | 허용 도구 목록 |
+| appendSystemPrompt | string | 추가 시스템 프롬프트 |
+
+**Response 200** — 업데이트된 잡 객체
+
+**Response 400**
+
+```json
+{ "error": "Invalid cron expression" }
+```
+
+**Response 404**
+
+```json
+{ "error": "Job not found" }
+```
+
+---
+
 ## DELETE /jobs/:id
 
 잡을 삭제한다. 스케줄이 중지되고 목록에서 제거된다.
@@ -354,6 +397,16 @@ curl -X POST http://localhost:3000/jobs/1/pause
 
 # 잡 재개
 curl -X POST http://localhost:3000/jobs/1/resume
+
+# 잡 설정 변경 (부분 업데이트)
+curl -X PATCH http://localhost:3000/jobs/1 \
+  -H "Content-Type: application/json" \
+  -d '{"maxBudget": null, "timeoutMs": 1800000}'
+
+# cron 스케줄 변경
+curl -X PATCH http://localhost:3000/jobs/1 \
+  -H "Content-Type: application/json" \
+  -d '{"expression": "0 */6 * * *"}'
 
 # 잡 삭제
 curl -X DELETE http://localhost:3000/jobs/1
