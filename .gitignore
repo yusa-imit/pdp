@@ -1,0 +1,15 @@
+node_modules
+
+# runtime data
+data/
+
+# env
+.env
+.env.*
+
+# caches
+.cache
+*.tsbuildinfo
+
+# OS
+.DS_Store
