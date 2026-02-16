@@ -18,6 +18,7 @@ function makeJob(overrides: Partial<CronJob> = {}): CronJob {
     appendSystemPrompt: "",
     sessionLimitThreshold: 90,
     dailyBudgetUsd: null,
+    blockTokenLimit: null,
     instance: new Cron("* * * * *", { paused: true }, () => {}),
     createdAt: new Date().toISOString(),
     isRunning: false,

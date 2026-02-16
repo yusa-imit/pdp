@@ -46,6 +46,11 @@ export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Re
   if (body.dailyBudgetUsd !== undefined && body.dailyBudgetUsd !== null && body.dailyBudgetUsd <= 0) {
     return json({ error: "dailyBudgetUsd must be positive" }, 400);
   }
+  if (body.blockTokenLimit !== undefined && body.blockTokenLimit !== null) {
+    if (!Number.isInteger(body.blockTokenLimit) || body.blockTokenLimit <= 0) {
+      return json({ error: "blockTokenLimit must be a positive integer" }, 400);
+    }
+  }
 
   const job = await createJobInDB(ctx, body, {
     model: body.model || "sonnet",
@@ -56,6 +61,7 @@ export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Re
     appendSystemPrompt: body.appendSystemPrompt || "",
     sessionLimitThreshold: body.sessionLimitThreshold ?? 90,
     dailyBudgetUsd: body.dailyBudgetUsd ?? null,
+    blockTokenLimit: body.blockTokenLimit ?? null,
   });
 
   console.log(`Job created: "${job.name}" (id=${job.id}) [${job.expression}]`);
@@ -83,6 +89,11 @@ export async function handleUpdateJob(ctx: AppContext, id: number, req: Request)
   }
   if (body.dailyBudgetUsd !== undefined && body.dailyBudgetUsd !== null && body.dailyBudgetUsd <= 0) {
     return json({ error: "dailyBudgetUsd must be positive" }, 400);
+  }
+  if (body.blockTokenLimit !== undefined && body.blockTokenLimit !== null) {
+    if (!Number.isInteger(body.blockTokenLimit) || body.blockTokenLimit <= 0) {
+      return json({ error: "blockTokenLimit must be a positive integer" }, 400);
+    }
   }
 
   const updated = await updateJobInDB(ctx, job, body);

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { getDailyUsage, shouldSkipForUsage } from "../src/services/usage";
+import type { ActiveBlock } from "../src/services/usage";
 import type { AppContext, CronJob } from "../src/types";
 import { Cron } from "croner";
 import { createTestContext } from "./helpers";
@@ -29,11 +30,24 @@ function makeJob(overrides: Partial<CronJob> = {}): CronJob {
     appendSystemPrompt: "",
     sessionLimitThreshold: 90,
     dailyBudgetUsd: null,
+    blockTokenLimit: null,
     instance: new Cron("* * * * *", { paused: true }, () => {}),
     createdAt: new Date().toISOString(),
     isRunning: false,
     ...overrides,
   };
+}
+
+function mockActiveBlock(totalTokens: number): () => Promise<ActiveBlock | null> {
+  return async () => ({
+    id: "2026-02-16T16:00:00.000Z",
+    startTime: "2026-02-16T16:00:00.000Z",
+    endTime: "2026-02-16T21:00:00.000Z",
+    isActive: true,
+    totalTokens,
+    costUSD: 4.5,
+    projection: null,
+  });
 }
 
 describe("getDailyUsage", () => {
@@ -88,13 +102,13 @@ describe("getDailyUsage", () => {
 });
 
 describe("shouldSkipForUsage", () => {
-  test("returns skip=false when dailyBudgetUsd is null (fail-open)", async () => {
-    const job = makeJob({ dailyBudgetUsd: null });
+  test("returns skip=false when both limits are null (fail-open)", async () => {
+    const job = makeJob({ dailyBudgetUsd: null, blockTokenLimit: null });
     const result = await shouldSkipForUsage(ctx, job);
     expect(result.skip).toBe(false);
   });
 
-  test("returns skip=false when usage is below threshold", async () => {
+  test("returns skip=false when usage is below daily budget threshold", async () => {
     const now = new Date();
     await ctx.db.run(
       "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
@@ -107,7 +121,7 @@ describe("shouldSkipForUsage", () => {
     expect(result.skip).toBe(false);
   });
 
-  test("returns skip=true when usage reaches threshold", async () => {
+  test("returns skip=true when daily usage reaches threshold", async () => {
     const now = new Date();
     await ctx.db.run(
       "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
@@ -122,7 +136,7 @@ describe("shouldSkipForUsage", () => {
     expect(result.reason).toContain("90%");
   });
 
-  test("returns skip=true when usage exceeds threshold", async () => {
+  test("returns skip=true when daily usage exceeds threshold", async () => {
     const now = new Date();
     await ctx.db.run(
       "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
@@ -137,7 +151,6 @@ describe("shouldSkipForUsage", () => {
 
   test("considers all jobs' runs for daily total", async () => {
     const now = new Date();
-    // Runs from different jobs
     await ctx.db.run(
       "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
       1, now.toISOString(), 20.0
@@ -151,5 +164,63 @@ describe("shouldSkipForUsage", () => {
     const job = makeJob({ id: 3, dailyBudgetUsd: 50, sessionLimitThreshold: 90 });
     const result = await shouldSkipForUsage(ctx, job);
     expect(result.skip).toBe(true);
+  });
+});
+
+describe("shouldSkipForUsage with blockTokenLimit", () => {
+  test("skips when block tokens exceed threshold", async () => {
+    // blockTokenLimit=10M, threshold 90% → limit 9M, tokens 9.5M → skip
+    const job = makeJob({ blockTokenLimit: 10_000_000, sessionLimitThreshold: 90 });
+    const result = await shouldSkipForUsage(ctx, job, mockActiveBlock(9_500_000));
+    expect(result.skip).toBe(true);
+    expect(result.reason).toContain("Block tokens");
+    expect(result.reason).toContain("90%");
+  });
+
+  test("does not skip when block tokens below threshold", async () => {
+    // blockTokenLimit=10M, threshold 90% → limit 9M, tokens 5M → no skip
+    const job = makeJob({ blockTokenLimit: 10_000_000, sessionLimitThreshold: 90 });
+    const result = await shouldSkipForUsage(ctx, job, mockActiveBlock(5_000_000));
+    expect(result.skip).toBe(false);
+  });
+
+  test("falls through to daily budget when ccusage returns no active block", async () => {
+    const now = new Date();
+    await ctx.db.run(
+      "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
+      1, now.toISOString(), 45.0
+    );
+
+    // blockTokenLimit set but ccusage returns null → fall through to dailyBudget
+    // Budget $50, threshold 90% → limit $45, usage $45 → skip
+    const job = makeJob({ blockTokenLimit: 10_000_000, dailyBudgetUsd: 50, sessionLimitThreshold: 90 });
+    const result = await shouldSkipForUsage(ctx, job, async () => null);
+    expect(result.skip).toBe(true);
+    expect(result.reason).toContain("Daily usage");
+  });
+
+  test("blockTokenLimit check takes priority over dailyBudgetUsd", async () => {
+    // Both limits set, block tokens exceed → should skip with block reason, not daily
+    const job = makeJob({ blockTokenLimit: 10_000_000, dailyBudgetUsd: 50, sessionLimitThreshold: 90 });
+    const result = await shouldSkipForUsage(ctx, job, mockActiveBlock(9_500_000));
+    expect(result.skip).toBe(true);
+    expect(result.reason).toContain("Block tokens");
+    expect(result.reason).not.toContain("Daily usage");
+  });
+
+  test("does not skip when block is not active", async () => {
+    const mockInactiveBlock = async (): Promise<ActiveBlock | null> => ({
+      id: "2026-02-16T16:00:00.000Z",
+      startTime: "2026-02-16T16:00:00.000Z",
+      endTime: "2026-02-16T21:00:00.000Z",
+      isActive: false,
+      totalTokens: 9_500_000,
+      costUSD: 4.5,
+      projection: null,
+    });
+
+    const job = makeJob({ blockTokenLimit: 10_000_000, sessionLimitThreshold: 90 });
+    const result = await shouldSkipForUsage(ctx, job, mockInactiveBlock);
+    expect(result.skip).toBe(false);
   });
 });

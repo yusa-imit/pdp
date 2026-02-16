@@ -52,8 +52,9 @@ docs/
 5. **Test**: Run `bun test` — all tests must pass
 6. **Validate**: Start server with `bun start`, verify health endpoint
 7. **Commit**: Descriptive message with Co-Authored-By
-8. **Memory Update**: Record decisions, patterns, session summary in `.claude/memory/`
-9. **Summary**: Send Discord notification via openclaw CLI
+8. **Push**: `git push` to sync with remote
+9. **Memory Update**: Record decisions, patterns, session summary in `.claude/memory/`
+10. **Summary**: Send Discord notification via openclaw CLI
 
 ### Running the Project
 

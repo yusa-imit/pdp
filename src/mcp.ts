@@ -61,6 +61,7 @@ server.registerTool("create_job", {
     appendSystemPrompt: z.string().optional().describe("추가 시스템 프롬프트"),
     sessionLimitThreshold: z.number().min(0).max(100).optional().describe("일일 예산 threshold % (기본: 90). 이 비율에 도달하면 실행을 스킵한다."),
     dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD. null이면 제한 없음."),
+    blockTokenLimit: z.number().int().positive().nullable().optional().describe("세션 블록 토큰 제한. ccusage로 활성 블록의 totalTokens를 체크하여 threshold%에 도달하면 실행을 스킵한다. null이면 체크 안함."),
   },
 }, async (args) => {
   const data = await api("/jobs", { method: "POST", body: JSON.stringify(args) });
@@ -84,6 +85,7 @@ server.registerTool("update_job", {
     appendSystemPrompt: z.string().optional().describe("추가 시스템 프롬프트"),
     sessionLimitThreshold: z.number().min(0).max(100).optional().describe("일일 예산 threshold % (0-100)"),
     dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD (null이면 제한 없음)"),
+    blockTokenLimit: z.number().int().positive().nullable().optional().describe("세션 블록 토큰 제한 (null이면 체크 안함)"),
   },
 }, async ({ id, ...updates }) => {
   const data = await api(`/jobs/${id}`, { method: "PATCH", body: JSON.stringify(updates) });

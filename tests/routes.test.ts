@@ -40,6 +40,7 @@ const defaultOpts = {
   appendSystemPrompt: "",
   sessionLimitThreshold: 90,
   dailyBudgetUsd: null as number | null,
+  blockTokenLimit: null as number | null,
 };
 
 describe("GET /health", () => {

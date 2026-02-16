@@ -44,6 +44,7 @@ function makeCronJob(overrides: Partial<CronJob> = {}): CronJob {
     appendSystemPrompt: "",
     sessionLimitThreshold: 90,
     dailyBudgetUsd: null,
+    blockTokenLimit: null,
     instance: null as unknown as Cron,
     createdAt: new Date().toISOString(),
     isRunning: false,
@@ -60,6 +61,7 @@ const defaultOpts = {
   appendSystemPrompt: "",
   sessionLimitThreshold: 90,
   dailyBudgetUsd: null as number | null,
+  blockTokenLimit: null as number | null,
 };
 
 describe("in-memory job management", () => {
@@ -171,10 +173,10 @@ describe("DB persistence", () => {
   test("loadJobs restores jobs from DB into memory", async () => {
     // Create a job in DB directly
     await ctx.db.run(
-      `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt, session_limit_threshold, daily_budget_usd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt, session_limit_threshold, daily_budget_usd, block_token_limit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       "loaded-job", "30 2 * * *", "do stuff", "/tmp",
-      "sonnet", "bypassPermissions", null, 600000, '["Read","Write"]', "", 85, 100
+      "sonnet", "bypassPermissions", null, 600000, '["Read","Write"]', "", 85, 100, 10000000
     );
 
     // Clear in-memory state
@@ -189,6 +191,7 @@ describe("DB persistence", () => {
     expect(job.allowedTools).toEqual(["Read", "Write"]);
     expect(job.sessionLimitThreshold).toBe(85);
     expect(job.dailyBudgetUsd).toBe(100);
+    expect(job.blockTokenLimit).toBe(10000000);
   });
 });
 
