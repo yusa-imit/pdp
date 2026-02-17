@@ -78,9 +78,13 @@ export interface AppContext {
 
 export interface ClaudeJsonResult {
   result: string;
-  cost_usd: number;
-  input_tokens: number;
-  output_tokens: number;
+  total_cost_usd: number;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+  };
   duration_ms: number;
   duration_api_ms: number;
   is_error: boolean;

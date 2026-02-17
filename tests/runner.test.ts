@@ -73,9 +73,13 @@ describe("parseClaudeJson", () => {
   test("parses valid JSON output", () => {
     const json = JSON.stringify({
       result: "Done!",
-      cost_usd: 0.1234,
-      input_tokens: 1000,
-      output_tokens: 500,
+      total_cost_usd: 0.1234,
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 500,
+        cache_creation_input_tokens: 2000,
+        cache_read_input_tokens: 3000,
+      },
       duration_ms: 30000,
       duration_api_ms: 25000,
       is_error: false,
@@ -84,9 +88,9 @@ describe("parseClaudeJson", () => {
     });
     const result = parseClaudeJson(json);
     expect(result).not.toBeNull();
-    expect(result!.cost_usd).toBe(0.1234);
-    expect(result!.input_tokens).toBe(1000);
-    expect(result!.output_tokens).toBe(500);
+    expect(result!.total_cost_usd).toBe(0.1234);
+    expect(result!.usage.input_tokens).toBe(1000);
+    expect(result!.usage.output_tokens).toBe(500);
     expect(result!.result).toBe("Done!");
   });
 

@@ -143,9 +143,9 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     const claudeResult = parseClaudeJson(stdoutStr);
 
     if (claudeResult) {
-      costUsd = claudeResult.cost_usd ?? null;
-      inputTokens = claudeResult.input_tokens ?? null;
-      outputTokens = claudeResult.output_tokens ?? null;
+      costUsd = claudeResult.total_cost_usd ?? null;
+      inputTokens = claudeResult.usage?.input_tokens ?? null;
+      outputTokens = claudeResult.usage?.output_tokens ?? null;
       // Write the result text to the log
       logSink.write(`\n${"=".repeat(60)}\n[RESULT]\n${claudeResult.result}\n`);
       console.log(`  cost=$${costUsd?.toFixed(4)} in=${inputTokens} out=${outputTokens}`);
