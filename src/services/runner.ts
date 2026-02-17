@@ -28,12 +28,15 @@ export function buildClaudeArgs(job: CronJob): string[] {
 }
 
 export function parseClaudeJson(stdout: string): ClaudeJsonResult | null {
-  try {
-    const parsed = JSON.parse(stdout);
-    return parsed as ClaudeJsonResult;
-  } catch {
-    return null;
+  // claude --output-format json emits JSONL; the result is the last line with type=result
+  const lines = stdout.trim().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(lines[i]);
+      if (parsed.type === "result") return parsed as ClaudeJsonResult;
+    } catch { /* skip non-JSON lines */ }
   }
+  return null;
 }
 
 export async function runJob(ctx: AppContext, job: CronJob) {

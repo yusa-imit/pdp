@@ -70,8 +70,10 @@ describe("buildClaudeArgs", () => {
 });
 
 describe("parseClaudeJson", () => {
-  test("parses valid JSON output", () => {
-    const json = JSON.stringify({
+  test("parses result from JSONL stream", () => {
+    const initLine = JSON.stringify({ type: "system", subtype: "init", session_id: "x" });
+    const resultLine = JSON.stringify({
+      type: "result",
       result: "Done!",
       total_cost_usd: 0.1234,
       usage: {
@@ -86,7 +88,8 @@ describe("parseClaudeJson", () => {
       session_id: "abc-123",
       num_turns: 5,
     });
-    const result = parseClaudeJson(json);
+    const stdout = `${initLine}\n${resultLine}\n`;
+    const result = parseClaudeJson(stdout);
     expect(result).not.toBeNull();
     expect(result!.total_cost_usd).toBe(0.1234);
     expect(result!.usage.input_tokens).toBe(1000);
@@ -94,8 +97,30 @@ describe("parseClaudeJson", () => {
     expect(result!.result).toBe("Done!");
   });
 
+  test("parses single-line result", () => {
+    const json = JSON.stringify({
+      type: "result",
+      result: "hi",
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      duration_ms: 100,
+      duration_api_ms: 90,
+      is_error: false,
+      session_id: "abc",
+      num_turns: 1,
+    });
+    const result = parseClaudeJson(json);
+    expect(result).not.toBeNull();
+    expect(result!.result).toBe("hi");
+  });
+
   test("returns null for invalid JSON", () => {
     expect(parseClaudeJson("not json")).toBeNull();
     expect(parseClaudeJson("")).toBeNull();
+  });
+
+  test("returns null when no result line exists", () => {
+    const initLine = JSON.stringify({ type: "system", subtype: "init" });
+    expect(parseClaudeJson(initLine)).toBeNull();
   });
 });
