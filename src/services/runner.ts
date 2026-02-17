@@ -1,4 +1,5 @@
 import type { AppContext, CronJob, ClaudeJsonResult } from "../types";
+import { getAllJobs } from "./scheduler";
 import { shouldSkipForUsage } from "./usage";
 
 export function buildClaudeArgs(job: CronJob): string[] {
@@ -57,6 +58,18 @@ export function parseClaudeJson(stdout: string): ClaudeJsonResult | null {
 export async function runJob(ctx: AppContext, job: CronJob) {
   if (job.isRunning) {
     console.log(`[SKIP] Job "${job.name}" (id=${job.id}) is already running, skipping`);
+    return;
+  }
+
+  // Check parallel job limit
+  const runningCount = getAllJobs(ctx).filter((j) => j.isRunning).length;
+  if (runningCount >= ctx.maxParallelJobs) {
+    const reason = `Parallel limit reached (${runningCount}/${ctx.maxParallelJobs})`;
+    console.log(`[SKIP] Job "${job.name}" (id=${job.id}) — ${reason}`);
+    await ctx.db.run(
+      "INSERT INTO runs (job_id, started_at, finished_at, duration_ms, status, error) VALUES (?, ?, ?, 0, 'skipped', ?)",
+      job.id, new Date().toISOString(), new Date().toISOString(), reason
+    );
     return;
   }
 

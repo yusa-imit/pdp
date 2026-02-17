@@ -8,5 +8,5 @@ export async function createTestContext(): Promise<AppContext> {
   const logsDir = await mkdtemp(join(tmpdir(), "cron-test-logs-"));
   const db = createDb(":memory:");
   await db.init();
-  return { db, jobs: new Map(), logsDir };
+  return { db, jobs: new Map(), logsDir, maxParallelJobs: 5 };
 }

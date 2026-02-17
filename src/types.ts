@@ -74,6 +74,7 @@ export interface AppContext {
   db: Db;
   jobs: Map<number, CronJob>;
   logsDir: string;
+  maxParallelJobs: number;
 }
 
 export interface ClaudeJsonResult {

@@ -6,6 +6,7 @@ import type { AppContext } from "./types";
 
 const DB_PATH = process.env.DB_PATH || "./data/cron.db";
 const LOGS_DIR = process.env.LOGS_DIR || "./data/logs";
+const MAX_PARALLEL_JOBS = Number(process.env.MAX_PARALLEL_JOBS) || 5;
 
 // --- Bootstrap ---
 
@@ -18,6 +19,7 @@ const ctx: AppContext = {
   db,
   jobs: new Map(),
   logsDir: LOGS_DIR,
+  maxParallelJobs: MAX_PARALLEL_JOBS,
 };
 
 await loadJobs(ctx);

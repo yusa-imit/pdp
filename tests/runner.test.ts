@@ -1,7 +1,9 @@
-import { describe, test, expect } from "bun:test";
-import { buildClaudeArgs, parseClaudeJson } from "../src/services/runner";
-import type { CronJob } from "../src/types";
+import { describe, test, expect, afterEach } from "bun:test";
+import { buildClaudeArgs, parseClaudeJson, runJob } from "../src/services/runner";
+import { scheduleJob } from "../src/services/scheduler";
+import type { AppContext, CronJob } from "../src/types";
 import { Cron } from "croner";
+import { createTestContext } from "./helpers";
 
 function makeJob(overrides: Partial<CronJob> = {}): CronJob {
   return {
@@ -145,5 +147,44 @@ describe("parseClaudeJson", () => {
   test("returns null when no result line exists", () => {
     const initLine = JSON.stringify({ type: "system", subtype: "init" });
     expect(parseClaudeJson(initLine)).toBeNull();
+  });
+});
+
+describe("runJob parallel limit", () => {
+  let ctx: AppContext;
+
+  afterEach(async () => {
+    if (ctx) {
+      for (const job of ctx.jobs.values()) job.instance.stop();
+      await ctx.db.close();
+    }
+  });
+
+  test("skips job when parallel limit is reached", async () => {
+    ctx = await createTestContext();
+    ctx.maxParallelJobs = 2;
+
+    // Register 2 already-running jobs
+    const running1 = makeJob({ id: 1, name: "running-1", isRunning: true });
+    const running2 = makeJob({ id: 2, name: "running-2", isRunning: true });
+    scheduleJob(ctx, running1);
+    scheduleJob(ctx, running2);
+
+    // Try to run a 3rd job
+    const newJob = makeJob({ id: 3, name: "new-job" });
+    scheduleJob(ctx, newJob);
+
+    await runJob(ctx, newJob);
+
+    // Job should NOT be running
+    expect(newJob.isRunning).toBe(false);
+
+    // A skipped run should be recorded
+    const runs = await ctx.db.all<{ status: string; error: string }>(
+      "SELECT status, error FROM runs WHERE job_id = ?", 3
+    );
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe("skipped");
+    expect(runs[0].error).toContain("Parallel limit reached");
   });
 });

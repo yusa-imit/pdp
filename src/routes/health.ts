@@ -10,6 +10,7 @@ export async function handleHealth(ctx: AppContext): Promise<Response> {
     status: "ok",
     jobs: all.length,
     running: all.filter((j) => j.isRunning).length,
+    maxParallelJobs: ctx.maxParallelJobs,
     dailyUsage,
   });
 }
