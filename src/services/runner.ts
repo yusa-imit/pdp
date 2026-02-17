@@ -28,13 +28,28 @@ export function buildClaudeArgs(job: CronJob): string[] {
 }
 
 export function parseClaudeJson(stdout: string): ClaudeJsonResult | null {
-  // claude --output-format json emits JSONL; the result is the last line with type=result
-  const lines = stdout.trim().split("\n");
+  // claude --output-format json may emit a JSON array or JSONL stream
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    // JSON array: find the result entry
+    if (Array.isArray(parsed)) {
+      const result = parsed.find((e: any) => e.type === "result");
+      return result ? (result as ClaudeJsonResult) : null;
+    }
+    // Single object with type=result
+    if (parsed.type === "result") return parsed as ClaudeJsonResult;
+  } catch { /* not a single JSON blob, try JSONL */ }
+
+  // JSONL: scan lines from end for type=result
+  const lines = trimmed.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const parsed = JSON.parse(lines[i]);
       if (parsed.type === "result") return parsed as ClaudeJsonResult;
-    } catch { /* skip non-JSON lines */ }
+    } catch { /* skip */ }
   }
   return null;
 }

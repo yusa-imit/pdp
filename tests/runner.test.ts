@@ -114,6 +114,29 @@ describe("parseClaudeJson", () => {
     expect(result!.result).toBe("hi");
   });
 
+  test("parses result from JSON array", () => {
+    const arr = JSON.stringify([
+      { type: "system", subtype: "init", session_id: "x" },
+      { type: "assistant", message: { content: [{ type: "text", text: "hello" }] } },
+      {
+        type: "result",
+        result: "hello",
+        total_cost_usd: 0.002,
+        usage: { input_tokens: 3, output_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 22000 },
+        duration_ms: 1300,
+        duration_api_ms: 1200,
+        is_error: false,
+        session_id: "abc",
+        num_turns: 1,
+      },
+    ]);
+    const result = parseClaudeJson(arr);
+    expect(result).not.toBeNull();
+    expect(result!.result).toBe("hello");
+    expect(result!.total_cost_usd).toBe(0.002);
+    expect(result!.usage.cache_read_input_tokens).toBe(22000);
+  });
+
   test("returns null for invalid JSON", () => {
     expect(parseClaudeJson("not json")).toBeNull();
     expect(parseClaudeJson("")).toBeNull();
