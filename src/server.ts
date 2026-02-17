@@ -10,6 +10,7 @@ import {
   handleTriggerJob,
 } from "./routes/jobs";
 import { handleGetRuns, handleGetLog } from "./routes/runs";
+import { handleDashboard, handleJobsFragment, handleRunsFragment, handleLogFragment } from "./routes/ui";
 import { json } from "./lib/response";
 import type { AppContext } from "./types";
 
@@ -22,6 +23,24 @@ export function startServer(ctx: AppContext) {
       const url = new URL(req.url);
       const { pathname } = url;
       const method = req.method;
+
+      if (method === "GET" && pathname === "/") {
+        return await handleDashboard(ctx);
+      }
+
+      if (method === "GET" && pathname === "/ui/jobs") {
+        return await handleJobsFragment(ctx);
+      }
+
+      const uiRunsMatch = pathname.match(/^\/ui\/jobs\/(\d+)\/runs$/);
+      if (method === "GET" && uiRunsMatch) {
+        return await handleRunsFragment(ctx, Number(uiRunsMatch[1]));
+      }
+
+      const uiLogMatch = pathname.match(/^\/ui\/jobs\/(\d+)\/log$/);
+      if (method === "GET" && uiLogMatch) {
+        return await handleLogFragment(ctx, Number(uiLogMatch[1]), req);
+      }
 
       if (method === "GET" && pathname === "/health") {
         return await handleHealth(ctx);

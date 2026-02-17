@@ -11,3 +11,10 @@ export function text(content: string, status = 200) {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
 }
+
+export function html(content: string, status = 200) {
+  return new Response(content, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
