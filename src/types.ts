@@ -19,6 +19,7 @@ export interface CronJob {
   instance: Cron;
   createdAt: string;
   isRunning: boolean;
+  isPaused: boolean;
 }
 
 export interface CreateJobBody {
@@ -52,6 +53,7 @@ export interface JobRow {
   session_limit_threshold: number;
   daily_budget_usd: number | null;
   block_token_limit: number | null;
+  is_paused: boolean;
   created_at: string;
 }
 

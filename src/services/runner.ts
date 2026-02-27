@@ -1,6 +1,5 @@
 import type { AppContext, CronJob, ClaudeJsonResult } from "../types";
 import { getAllJobs } from "./scheduler";
-import { shouldSkipForUsage } from "./usage";
 
 export function buildClaudeArgs(job: CronJob): string[] {
   const args = [
@@ -69,17 +68,6 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     await ctx.db.run(
       "INSERT INTO runs (job_id, started_at, finished_at, duration_ms, status, error) VALUES (?, ?, ?, 0, 'skipped', ?)",
       job.id, new Date().toISOString(), new Date().toISOString(), reason
-    );
-    return;
-  }
-
-  // Check usage threshold before running
-  const usageCheck = await shouldSkipForUsage(ctx, job);
-  if (usageCheck.skip) {
-    console.log(`[SKIP] Job "${job.name}" (id=${job.id}) — ${usageCheck.reason}`);
-    await ctx.db.run(
-      "INSERT INTO runs (job_id, started_at, finished_at, duration_ms, status, error) VALUES (?, ?, ?, 0, 'skipped', ?)",
-      job.id, new Date().toISOString(), new Date().toISOString(), usageCheck.reason
     );
     return;
   }

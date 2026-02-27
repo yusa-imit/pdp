@@ -59,9 +59,9 @@ server.registerTool("create_job", {
     timeoutMs: z.number().optional().describe("타임아웃 ms (기본: 600000)"),
     allowedTools: z.array(z.string()).optional().describe("허용 도구 목록"),
     appendSystemPrompt: z.string().optional().describe("추가 시스템 프롬프트"),
-    sessionLimitThreshold: z.number().min(0).max(100).optional().describe("일일 예산 threshold % (기본: 90). 이 비율에 도달하면 실행을 스킵한다."),
-    dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD. null이면 제한 없음."),
-    blockTokenLimit: z.number().int().positive().nullable().optional().describe("세션 블록 토큰 제한. ccusage로 활성 블록의 totalTokens를 체크하여 threshold%에 도달하면 실행을 스킵한다. null이면 체크 안함."),
+    sessionLimitThreshold: z.number().min(0).max(100).optional().describe("예산 threshold % (기본: 90). 추후 사용 예정."),
+    dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD. 추후 사용 예정. null이면 제한 없음."),
+    blockTokenLimit: z.number().int().positive().nullable().optional().describe("블록 토큰 제한. 추후 사용 예정. null이면 체크 안함."),
   },
 }, async (args) => {
   const data = await api("/jobs", { method: "POST", body: JSON.stringify(args) });
@@ -83,9 +83,9 @@ server.registerTool("update_job", {
     timeoutMs: z.number().optional().describe("타임아웃 ms"),
     allowedTools: z.array(z.string()).optional().describe("허용 도구 목록"),
     appendSystemPrompt: z.string().optional().describe("추가 시스템 프롬프트"),
-    sessionLimitThreshold: z.number().min(0).max(100).optional().describe("일일 예산 threshold % (0-100)"),
-    dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD (null이면 제한 없음)"),
-    blockTokenLimit: z.number().int().positive().nullable().optional().describe("세션 블록 토큰 제한 (null이면 체크 안함)"),
+    sessionLimitThreshold: z.number().min(0).max(100).optional().describe("예산 threshold % (0-100). 추후 사용 예정."),
+    dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD. 추후 사용 예정."),
+    blockTokenLimit: z.number().int().positive().nullable().optional().describe("블록 토큰 제한. 추후 사용 예정."),
   },
 }, async ({ id, ...updates }) => {
   const data = await api(`/jobs/${id}`, { method: "PATCH", body: JSON.stringify(updates) });

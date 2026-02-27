@@ -1,19 +1,16 @@
 import { html, json } from "../lib/response";
 import { getAllJobs, getJob, jobToJSON } from "../services/scheduler";
-import { getDailyUsage } from "../services/usage";
 import { renderPage, renderJobsTable, renderRunsPanel, renderLogPanel } from "../views/dashboard";
 import type { AppContext } from "../types";
 
 export async function handleDashboard(ctx: AppContext): Promise<Response> {
   const all = getAllJobs(ctx);
   const jobsJSON = await Promise.all(all.map((j) => jobToJSON(ctx, j)));
-  const dailyUsage = await getDailyUsage(ctx);
 
   const health = {
     running: all.filter((j) => j.isRunning).length,
     jobs: all.length,
     maxParallelJobs: ctx.maxParallelJobs,
-    dailyUsage,
   };
 
   const jobsHtml = renderJobsTable(jobsJSON);

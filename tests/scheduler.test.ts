@@ -48,6 +48,7 @@ function makeCronJob(overrides: Partial<CronJob> = {}): CronJob {
     instance: null as unknown as Cron,
     createdAt: new Date().toISOString(),
     isRunning: false,
+    isPaused: false,
     ...overrides,
   };
 }
@@ -104,22 +105,24 @@ describe("in-memory job management", () => {
     expect(removeJob(ctx, 999)).toBeUndefined();
   });
 
-  test("pauseJob pauses the cron instance", () => {
+  test("pauseJob pauses the cron instance and sets isPaused", async () => {
     const job = makeCronJob({ id: 1 });
     scheduleJob(ctx, job);
 
-    pauseJob(job);
+    await pauseJob(ctx, job);
     expect(job.instance.isStopped()).toBe(false);
+    expect(job.isPaused).toBe(true);
     // Paused jobs still exist but don't fire
   });
 
-  test("resumeJob resumes a paused job", () => {
+  test("resumeJob resumes a paused job and clears isPaused", async () => {
     const job = makeCronJob({ id: 1 });
     scheduleJob(ctx, job);
 
-    pauseJob(job);
-    resumeJob(job);
+    await pauseJob(ctx, job);
+    await resumeJob(ctx, job);
     expect(job.instance.isStopped()).toBe(false);
+    expect(job.isPaused).toBe(false);
   });
 });
 
@@ -214,7 +217,6 @@ describe("jobToJSON", () => {
     expect(data.nextRun).toBeDefined();
     expect(data.sessionLimitThreshold).toBe(90);
     expect(data.dailyBudgetUsd).toBeNull();
-    expect(data.dailyUsage).toBe(0);
   });
 
   test("serializes job with a run including cost data", async () => {
@@ -238,6 +240,5 @@ describe("jobToJSON", () => {
     expect(data.lastRun!.costUsd).toBe(0.25);
     expect(data.lastRun!.inputTokens).toBe(5000);
     expect(data.lastRun!.outputTokens).toBe(2000);
-    expect(data.dailyUsage).toBe(0.25);
   });
 });

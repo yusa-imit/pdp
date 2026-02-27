@@ -1,6 +1,5 @@
 import { Cron } from "croner";
 import { runJob } from "./runner";
-import { getDailyUsage, getActiveBlock } from "./usage";
 import type { AppContext, CronJob, JobRow, RunRow } from "../types";
 
 // --- Accessors ---
@@ -29,12 +28,16 @@ export function removeJob(ctx: AppContext, id: number): CronJob | undefined {
   return job;
 }
 
-export function pauseJob(job: CronJob): void {
+export async function pauseJob(ctx: AppContext, job: CronJob): Promise<void> {
   job.instance.pause();
+  job.isPaused = true;
+  await ctx.db.run("UPDATE jobs SET is_paused = true WHERE id = ?", job.id);
 }
 
-export function resumeJob(job: CronJob): void {
+export async function resumeJob(ctx: AppContext, job: CronJob): Promise<void> {
   job.instance.resume();
+  job.isPaused = false;
+  await ctx.db.run("UPDATE jobs SET is_paused = false WHERE id = ?", job.id);
 }
 
 // --- Serialization ---
@@ -48,9 +51,6 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
     "SELECT count(*)::INTEGER as cnt FROM runs WHERE job_id = ?",
     job.id
   );
-  const dailyUsage = await getDailyUsage(ctx);
-  const activeBlock = await getActiveBlock();
-
   return {
     id: job.id,
     name: job.name,
@@ -66,7 +66,7 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
     sessionLimitThreshold: job.sessionLimitThreshold,
     dailyBudgetUsd: job.dailyBudgetUsd,
     blockTokenLimit: job.blockTokenLimit,
-    scheduled: !job.instance.isStopped(),
+    scheduled: !job.instance.isStopped() && !job.isPaused,
     isRunning: job.isRunning,
     nextRun: job.instance.nextRun()?.toISOString() ?? null,
     lastRun: lastRun
@@ -85,8 +85,6 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
         }
       : null,
     runCount: runCount?.cnt ?? 0,
-    dailyUsage,
-    activeBlock,
     createdAt: job.createdAt,
   };
 }
@@ -121,6 +119,7 @@ export async function createJobInDB(
     instance: null as unknown as Cron,
     createdAt: row!.created_at,
     isRunning: false,
+    isPaused: false,
   };
 
   scheduleJob(ctx, job);
@@ -193,9 +192,13 @@ export async function loadJobs(ctx: AppContext): Promise<void> {
       instance: null as unknown as Cron,
       createdAt: row.created_at,
       isRunning: false,
+      isPaused: !!row.is_paused,
     };
     scheduleJob(ctx, job);
-    console.log(`  Loaded job: "${job.name}" (id=${job.id}) [${job.expression}]`);
+    if (job.isPaused) {
+      job.instance.pause();
+    }
+    console.log(`  Loaded job: "${job.name}" (id=${job.id}) [${job.expression}]${job.isPaused ? " (paused)" : ""}`);
   }
 
   if (rows.length > 0) {

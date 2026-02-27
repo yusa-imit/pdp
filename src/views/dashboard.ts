@@ -4,7 +4,6 @@ interface HealthData {
   running: number;
   jobs: number;
   maxParallelJobs: number;
-  dailyUsage: number;
 }
 
 interface JobJSON {
@@ -332,7 +331,6 @@ export function renderPage(health: HealthData, jobsHtml: string): string {
     <div class="stats">
       <div class="stat">Running: <span class="stat-value">${health.running}/${health.jobs}</span></div>
       <div class="stat">Parallel: <span class="stat-value">${health.maxParallelJobs}</span></div>
-      <div class="stat">Daily: <span class="stat-value">$${health.dailyUsage.toFixed(2)}</span></div>
     </div>
   </div>
 

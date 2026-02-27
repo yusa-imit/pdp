@@ -24,6 +24,7 @@ function makeJob(overrides: Partial<CronJob> = {}): CronJob {
     instance: new Cron("* * * * *", { paused: true }, () => {}),
     createdAt: new Date().toISOString(),
     isRunning: false,
+    isPaused: false,
     ...overrides,
   };
 }

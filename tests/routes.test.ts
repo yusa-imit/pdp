@@ -51,7 +51,6 @@ describe("GET /health", () => {
     expect(body.status).toBe("ok");
     expect(body.jobs).toBe(0);
     expect(body.running).toBe(0);
-    expect(body.dailyUsage).toBe(0);
   });
 
   test("counts jobs correctly", async () => {
@@ -253,16 +252,16 @@ describe("POST /jobs/:id/pause & resume", () => {
       defaultOpts
     );
 
-    const pauseRes = handlePauseJob(ctx, job.id);
+    const pauseRes = await handlePauseJob(ctx, job.id);
     expect(pauseRes.status).toBe(200);
 
-    const resumeRes = handleResumeJob(ctx, job.id);
+    const resumeRes = await handleResumeJob(ctx, job.id);
     expect(resumeRes.status).toBe(200);
   });
 
-  test("returns 404 for missing job", () => {
-    expect(handlePauseJob(ctx, 999).status).toBe(404);
-    expect(handleResumeJob(ctx, 999).status).toBe(404);
+  test("returns 404 for missing job", async () => {
+    expect((await handlePauseJob(ctx, 999)).status).toBe(404);
+    expect((await handleResumeJob(ctx, 999)).status).toBe(404);
   });
 });
 

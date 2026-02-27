@@ -67,12 +67,12 @@ export function startServer(ctx: AppContext) {
 
       const pauseMatch = pathname.match(/^\/jobs\/(\d+)\/pause$/);
       if (method === "POST" && pauseMatch) {
-        return handlePauseJob(ctx, Number(pauseMatch[1]));
+        return await handlePauseJob(ctx, Number(pauseMatch[1]));
       }
 
       const resumeMatch = pathname.match(/^\/jobs\/(\d+)\/resume$/);
       if (method === "POST" && resumeMatch) {
-        return handleResumeJob(ctx, Number(resumeMatch[1]));
+        return await handleResumeJob(ctx, Number(resumeMatch[1]));
       }
 
       const triggerMatch = pathname.match(/^\/jobs\/(\d+)\/trigger$/);

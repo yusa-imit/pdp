@@ -110,20 +110,20 @@ export async function handleDeleteJob(ctx: AppContext, id: number): Promise<Resp
   return json({ message: "Job deleted" });
 }
 
-export function handlePauseJob(ctx: AppContext, id: number): Response {
+export async function handlePauseJob(ctx: AppContext, id: number): Promise<Response> {
   const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
-  pauseJob(job);
+  await pauseJob(ctx, job);
   console.log(`Job paused: "${job.name}" (id=${id})`);
   return json({ message: "Job paused", id });
 }
 
-export function handleResumeJob(ctx: AppContext, id: number): Response {
+export async function handleResumeJob(ctx: AppContext, id: number): Promise<Response> {
   const job = getJob(ctx, id);
   if (!job) return json({ error: "Job not found" }, 404);
 
-  resumeJob(job);
+  await resumeJob(ctx, job);
   console.log(`Job resumed: "${job.name}" (id=${id})`);
   return json({ message: "Job resumed", id });
 }
