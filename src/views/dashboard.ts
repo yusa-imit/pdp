@@ -120,7 +120,7 @@ export function renderJobsTable(jobs: JobJSON[]): string {
               hx-post="/jobs/${j.id}/resume"
               hx-swap="none"
               hx-on::after-request="htmx.trigger('#jobs-table','refresh')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 8A9 9 0 1 0 6.3 6.3L3 3"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M10 8l6 4-6 4z" fill="currentColor"/></svg>
             </button>`
         }
       </td>
