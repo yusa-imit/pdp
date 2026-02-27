@@ -102,25 +102,25 @@ export function renderJobsTable(jobs: JobJSON[]): string {
       <td>${j.runCount}</td>
       <td>${j.lastRun?.costUsd != null ? `$${j.lastRun.costUsd.toFixed(2)}` : "-"}</td>
       <td class="actions" onclick="event.stopPropagation()">
-        <button class="btn btn-sm"
+        <button class="btn btn-sm btn-icon" title="Trigger"
           hx-post="/jobs/${j.id}/trigger"
           hx-swap="none"
           hx-on::after-request="htmx.trigger('#jobs-table','refresh')"
           ${j.isRunning ? "disabled" : ""}>
-          ▶
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         </button>
         ${j.scheduled
-          ? `<button class="btn btn-sm"
+          ? `<button class="btn btn-sm btn-icon" title="Pause"
               hx-post="/jobs/${j.id}/pause"
               hx-swap="none"
               hx-on::after-request="htmx.trigger('#jobs-table','refresh')">
-              ⏸
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
             </button>`
-          : `<button class="btn btn-sm"
+          : `<button class="btn btn-sm btn-icon" title="Resume"
               hx-post="/jobs/${j.id}/resume"
               hx-swap="none"
               hx-on::after-request="htmx.trigger('#jobs-table','refresh')">
-              ▶️
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
             </button>`
         }
       </td>
@@ -289,6 +289,8 @@ export function renderPage(health: HealthData, jobsHtml: string): string {
     .btn:hover { background: #30363d; border-color: #8b949e; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-sm { padding: 2px 8px; }
+    .btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 4px 6px; }
+    .btn-icon svg { display: block; }
     #detail-panel, #log-panel {
       margin-top: 20px;
     }
