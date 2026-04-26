@@ -15,10 +15,12 @@ import { json } from "./lib/response";
 import type { AppContext } from "./types";
 
 const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || "127.0.0.1";
 
 export function startServer(ctx: AppContext) {
   const server = Bun.serve({
     port: PORT,
+    hostname: HOST,
     async fetch(req) {
       const url = new URL(req.url);
       const { pathname } = url;
