@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import type { AppContext, CronJob, ClaudeJsonResult } from "../types";
 import { getAllJobs } from "./scheduler";
 
@@ -25,6 +27,45 @@ export function buildClaudeArgs(job: CronJob): string[] {
 
   args.push(job.prompt);
   return args;
+}
+
+// Strip Bun's node→bun shim from the environment handed to spawned jobs.
+//
+// The cron server runs under `bun run`, and Bun injects a temp shim dir
+// (/private/tmp/bun-node-*) into PATH plus a NODE env var, both pointing `node`
+// at the bun binary. Inherited by a Claude job, this makes every downstream
+// `node` (pnpm → vitest → tinypool fork workers) run under Bun's JavaScriptCore
+// engine. JSC ignores V8's `--max-old-space-size`, so test-worker heaps grow
+// unbounded — a single Vitest fork was measured at a 35GB physical footprint,
+// driving the host deep into swap. Removing the shim makes children resolve a
+// real Node, where the heap cap is enforced.
+export function cleanJobEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const out = { ...env };
+  // The bun shim is the only `node` on PATH, so we must substitute a real Node
+  // (vite-plus ships one) before stripping the shim — otherwise downstream
+  // `node`/pnpm/vitest resolve to nothing and the test run dies.
+  const realNodeDir = `${homedir()}/.vite-plus/bin`;
+  const realNode = `${realNodeDir}/node`;
+  const hasRealNode = existsSync(realNode);
+
+  if (out.PATH) {
+    const parts = out.PATH.split(":").filter((p) => !p.includes("/bun-node-"));
+    if (hasRealNode && !parts.includes(realNodeDir)) {
+      parts.unshift(realNodeDir);
+    }
+    out.PATH = parts.join(":");
+  }
+  if (hasRealNode) {
+    out.NODE = realNode;
+  } else {
+    delete out.NODE;
+  }
+  // Force pnpm/npm to recompute the node binary from the cleaned PATH instead of
+  // reusing the inherited bun execpath.
+  delete out.npm_node_execpath;
+  return out;
 }
 
 export function parseClaudeJson(stdout: string): ClaudeJsonResult | null {
@@ -117,7 +158,7 @@ export async function runJob(ctx: AppContext, job: CronJob) {
       cwd: job.cwd,
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env },
+      env: cleanJobEnv(process.env),
     });
 
     // Buffer stdout (JSON output comes at process exit)
