@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import type { AppContext, CronJob, ClaudeJsonResult } from "../types";
 import { getAllJobs } from "./scheduler";
@@ -116,6 +116,13 @@ export async function runJob(ctx: AppContext, job: CronJob) {
   job.isRunning = true;
   const startedAt = new Date();
   const timestamp = startedAt.toISOString().replace(/[:.]/g, "-");
+  // Ensure the logs directory exists on every run, not just at server startup.
+  // The dir can be removed out from under a long-lived process (e.g. manual
+  // disk cleanup after an ENOSPC). If it's missing, Bun.file(...).writer()
+  // throws an opaque `ENOENT ... open ''` and the job dies in a few ms before
+  // Claude is ever spawned. Recreating it here keeps a deleted dir from
+  // silently breaking every job until the next restart.
+  mkdirSync(ctx.logsDir, { recursive: true });
   const logFile = `${ctx.logsDir}/job-${job.id}-${timestamp}.log`;
 
   await ctx.db.run(
