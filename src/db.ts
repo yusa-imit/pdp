@@ -86,10 +86,15 @@ export function createDb(dbPath: string): Db {
       "ALTER TABLE runs ADD COLUMN output_tokens INTEGER",
       "ALTER TABLE jobs ADD COLUMN block_token_limit INTEGER",
       "ALTER TABLE jobs ADD COLUMN is_paused BOOLEAN DEFAULT false",
-      "ALTER TABLE jobs ADD COLUMN extra_args TEXT NOT NULL DEFAULT '[]'",
+      "ALTER TABLE jobs ADD COLUMN extra_args TEXT DEFAULT '[]'",
     ];
     for (const sql of migrations) {
-      try { await run(sql); } catch { /* column already exists */ }
+      try { await run(sql); } catch (e) {
+        const msg = String(e);
+        if (!/already exists|Duplicate column|Column with name .* already exists/i.test(msg)) {
+          console.error(`[migration] failed: ${sql}\n  ${msg}`);
+        }
+      }
     }
   }
 
