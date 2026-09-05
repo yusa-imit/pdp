@@ -62,6 +62,7 @@ server.registerTool("create_job", {
     sessionLimitThreshold: z.number().min(0).max(100).optional().describe("예산 threshold % (기본: 90). 추후 사용 예정."),
     dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD. 추후 사용 예정. null이면 제한 없음."),
     blockTokenLimit: z.number().int().positive().nullable().optional().describe("블록 토큰 제한. 추후 사용 예정. null이면 체크 안함."),
+    extraArgs: z.array(z.string()).optional().describe("claude 실행 시 프롬프트 바로 앞에 그대로 전달할 추가 argv"),
   },
 }, async (args) => {
   const data = await api("/jobs", { method: "POST", body: JSON.stringify(args) });
@@ -86,6 +87,7 @@ server.registerTool("update_job", {
     sessionLimitThreshold: z.number().min(0).max(100).optional().describe("예산 threshold % (0-100). 추후 사용 예정."),
     dailyBudgetUsd: z.number().positive().nullable().optional().describe("일일 예산 USD. 추후 사용 예정."),
     blockTokenLimit: z.number().int().positive().nullable().optional().describe("블록 토큰 제한. 추후 사용 예정."),
+    extraArgs: z.array(z.string()).optional().describe("claude 실행 시 프롬프트 바로 앞에 그대로 전달할 추가 argv"),
   },
 }, async ({ id, ...updates }) => {
   const data = await api(`/jobs/${id}`, { method: "PATCH", body: JSON.stringify(updates) });

@@ -16,6 +16,7 @@ export interface CronJob {
   sessionLimitThreshold: number;
   dailyBudgetUsd: number | null;
   blockTokenLimit: number | null;
+  extraArgs?: string[];
   instance: Cron;
   createdAt: string;
   isRunning: boolean;
@@ -36,6 +37,7 @@ export interface CreateJobBody {
   sessionLimitThreshold?: number;
   dailyBudgetUsd?: number | null;
   blockTokenLimit?: number | null;
+  extraArgs?: string[];
 }
 
 export interface JobRow {
@@ -53,6 +55,7 @@ export interface JobRow {
   session_limit_threshold: number;
   daily_budget_usd: number | null;
   block_token_limit: number | null;
+  extra_args: string;
   is_paused: boolean;
   created_at: string;
 }

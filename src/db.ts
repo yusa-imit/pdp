@@ -54,6 +54,7 @@ export function createDb(dbPath: string): Db {
         session_limit_threshold INTEGER NOT NULL DEFAULT 90,
         daily_budget_usd DOUBLE,
         block_token_limit INTEGER,
+        extra_args    TEXT NOT NULL DEFAULT '[]',
         is_paused     BOOLEAN NOT NULL DEFAULT false,
         created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp
       )
@@ -85,6 +86,7 @@ export function createDb(dbPath: string): Db {
       "ALTER TABLE runs ADD COLUMN output_tokens INTEGER",
       "ALTER TABLE jobs ADD COLUMN block_token_limit INTEGER",
       "ALTER TABLE jobs ADD COLUMN is_paused BOOLEAN DEFAULT false",
+      "ALTER TABLE jobs ADD COLUMN extra_args TEXT NOT NULL DEFAULT '[]'",
     ];
     for (const sql of migrations) {
       try { await run(sql); } catch { /* column already exists */ }

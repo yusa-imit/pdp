@@ -14,6 +14,51 @@ import {
 } from "../services/scheduler";
 import type { AppContext, CreateJobBody } from "../types";
 
+// Flags that are already derived from other job-owned fields. Letting
+// extraArgs override them would silently change job semantics behind the
+// scheduler's back (e.g. sneaking in a second --model or --permission-mode).
+const OWNED_FLAGS = new Set([
+  "-p",
+  "--print",
+  "--output-format",
+  "--model",
+  "--permission-mode",
+  "--max-budget-usd",
+  "--allowedTools",
+  "--append-system-prompt",
+]);
+
+// Value-taking flags that would be meaningless (or dangerous) as the trailing
+// element of extraArgs, since buildClaudeArgs appends the prompt right after
+// extraArgs — a trailing value-taking flag would swallow the prompt as its
+// value instead of the flag getting one.
+const VALUE_TAKING_FLAGS = new Set([
+  "--add-dir",
+  "--settings",
+  "--append-system-prompt-file",
+  "--effort",
+  "--model",
+]);
+
+function validateExtraArgs(extraArgs: unknown): string | null {
+  if (!Array.isArray(extraArgs)) {
+    return "extraArgs must be an array of strings";
+  }
+  for (const el of extraArgs) {
+    if (typeof el !== "string" || el.length === 0) {
+      return "extraArgs must be an array of strings";
+    }
+    if (OWNED_FLAGS.has(el)) {
+      return "extraArgs must not override job-owned flags";
+    }
+  }
+  const last = extraArgs[extraArgs.length - 1];
+  if (typeof last === "string" && VALUE_TAKING_FLAGS.has(last)) {
+    return "extraArgs must not end with a value-taking flag";
+  }
+  return null;
+}
+
 export async function handleListJobs(ctx: AppContext): Promise<Response> {
   const list = await Promise.all(getAllJobs(ctx).map((j) => jobToJSON(ctx, j)));
   return json({ jobs: list });
@@ -51,6 +96,10 @@ export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Re
       return json({ error: "blockTokenLimit must be a positive integer" }, 400);
     }
   }
+  if (body.extraArgs !== undefined) {
+    const err = validateExtraArgs(body.extraArgs);
+    if (err) return json({ error: err }, 400);
+  }
 
   const job = await createJobInDB(ctx, body, {
     model: body.model || "sonnet",
@@ -62,6 +111,7 @@ export async function handleCreateJob(ctx: AppContext, req: Request): Promise<Re
     sessionLimitThreshold: body.sessionLimitThreshold ?? 90,
     dailyBudgetUsd: body.dailyBudgetUsd ?? null,
     blockTokenLimit: body.blockTokenLimit ?? null,
+    extraArgs: body.extraArgs ?? [],
   });
 
   console.log(`Job created: "${job.name}" (id=${job.id}) [${job.expression}]`);
@@ -94,6 +144,10 @@ export async function handleUpdateJob(ctx: AppContext, id: number, req: Request)
     if (!Number.isInteger(body.blockTokenLimit) || body.blockTokenLimit <= 0) {
       return json({ error: "blockTokenLimit must be a positive integer" }, 400);
     }
+  }
+  if (body.extraArgs !== undefined) {
+    const err = validateExtraArgs(body.extraArgs);
+    if (err) return json({ error: err }, 400);
   }
 
   const updated = await updateJobInDB(ctx, job, body);

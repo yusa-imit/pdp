@@ -66,6 +66,7 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
     sessionLimitThreshold: job.sessionLimitThreshold,
     dailyBudgetUsd: job.dailyBudgetUsd,
     blockTokenLimit: job.blockTokenLimit,
+    extraArgs: job.extraArgs ?? [],
     scheduled: !job.instance.isStopped() && !job.isPaused,
     isRunning: job.isRunning,
     nextRun: job.instance.nextRun()?.toISOString() ?? null,
@@ -94,15 +95,16 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
 export async function createJobInDB(
   ctx: AppContext,
   body: { name: string; expression: string; prompt: string; cwd: string },
-  opts: { model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string; sessionLimitThreshold: number; dailyBudgetUsd: number | null; blockTokenLimit: number | null }
+  opts: { model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string; sessionLimitThreshold: number; dailyBudgetUsd: number | null; blockTokenLimit: number | null; extraArgs?: string[] }
 ): Promise<CronJob> {
   await ctx.db.run(
-    `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt, session_limit_threshold, daily_budget_usd, block_token_limit)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO jobs (name, expression, prompt, cwd, model, permission_mode, max_budget, timeout_ms, allowed_tools, append_system_prompt, session_limit_threshold, daily_budget_usd, block_token_limit, extra_args)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     body.name, body.expression, body.prompt, body.cwd,
     opts.model, opts.permissionMode, opts.maxBudget, opts.timeoutMs,
     JSON.stringify(opts.allowedTools), opts.appendSystemPrompt,
-    opts.sessionLimitThreshold, opts.dailyBudgetUsd, opts.blockTokenLimit
+    opts.sessionLimitThreshold, opts.dailyBudgetUsd, opts.blockTokenLimit,
+    JSON.stringify(opts.extraArgs ?? [])
   );
 
   const row = await ctx.db.get<{ id: number; created_at: string }>(
@@ -129,7 +131,7 @@ export async function createJobInDB(
 export async function updateJobInDB(
   ctx: AppContext,
   job: CronJob,
-  updates: Partial<{ name: string; expression: string; prompt: string; cwd: string; model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string; sessionLimitThreshold: number; dailyBudgetUsd: number | null; blockTokenLimit: number | null }>
+  updates: Partial<{ name: string; expression: string; prompt: string; cwd: string; model: string; permissionMode: string; maxBudget: number | null; timeoutMs: number; allowedTools: string[]; appendSystemPrompt: string; sessionLimitThreshold: number; dailyBudgetUsd: number | null; blockTokenLimit: number | null; extraArgs: string[] }>
 ): Promise<CronJob> {
   const needsReschedule = updates.expression && updates.expression !== job.expression;
 
@@ -146,13 +148,15 @@ export async function updateJobInDB(
   if (updates.sessionLimitThreshold !== undefined) job.sessionLimitThreshold = updates.sessionLimitThreshold;
   if (updates.dailyBudgetUsd !== undefined) job.dailyBudgetUsd = updates.dailyBudgetUsd;
   if (updates.blockTokenLimit !== undefined) job.blockTokenLimit = updates.blockTokenLimit;
+  if (updates.extraArgs !== undefined) job.extraArgs = updates.extraArgs;
 
   await ctx.db.run(
-    `UPDATE jobs SET name = ?, expression = ?, prompt = ?, cwd = ?, model = ?, permission_mode = ?, max_budget = ?, timeout_ms = ?, allowed_tools = ?, append_system_prompt = ?, session_limit_threshold = ?, daily_budget_usd = ?, block_token_limit = ? WHERE id = ?`,
+    `UPDATE jobs SET name = ?, expression = ?, prompt = ?, cwd = ?, model = ?, permission_mode = ?, max_budget = ?, timeout_ms = ?, allowed_tools = ?, append_system_prompt = ?, session_limit_threshold = ?, daily_budget_usd = ?, block_token_limit = ?, extra_args = ? WHERE id = ?`,
     job.name, job.expression, job.prompt, job.cwd,
     job.model, job.permissionMode, job.maxBudget, job.timeoutMs,
     JSON.stringify(job.allowedTools), job.appendSystemPrompt,
-    job.sessionLimitThreshold, job.dailyBudgetUsd, job.blockTokenLimit, job.id
+    job.sessionLimitThreshold, job.dailyBudgetUsd, job.blockTokenLimit,
+    JSON.stringify(job.extraArgs ?? []), job.id
   );
 
   if (needsReschedule) {
@@ -189,6 +193,7 @@ export async function loadJobs(ctx: AppContext): Promise<void> {
       sessionLimitThreshold: row.session_limit_threshold,
       dailyBudgetUsd: row.daily_budget_usd,
       blockTokenLimit: row.block_token_limit,
+      extraArgs: JSON.parse(row.extra_args || "[]"),
       instance: null as unknown as Cron,
       createdAt: row.created_at,
       isRunning: false,

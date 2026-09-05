@@ -65,6 +65,7 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 | timeoutMs | number | X | `600000` | 실행 타임아웃 (ms). 기본 10분 |
 | allowedTools | string[] | X | `[]` | 허용할 도구 목록. `--allowedTools`로 전달됨. 빈 배열이면 제한 없음 |
 | appendSystemPrompt | string | X | `""` | 시스템 프롬프트에 추가할 텍스트. `--append-system-prompt`로 전달됨 |
+| extraArgs | string[] | X | `[]` | claude argv에 프롬프트 바로 앞에 그대로(verbatim) 전달할 추가 인자. `-p`, `--print`, `--output-format`, `--model`, `--permission-mode`, `--max-budget-usd`, `--allowedTools`, `--append-system-prompt`는 job이 이미 소유한 플래그라 지정할 수 없음(400). 배열의 각 원소는 비어있지 않은 문자열이어야 하며, 마지막 원소가 값이 필요한 플래그(`--add-dir`, `--settings`, `--append-system-prompt-file`, `--effort`, `--model`)면 거부됨(프롬프트가 그 값으로 삼켜지는 것을 방지) |
 
 **cron 표현식 형식**
 
@@ -157,6 +158,7 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 | timeoutMs | number | 타임아웃 (ms) |
 | allowedTools | string[] | 허용 도구 목록 |
 | appendSystemPrompt | string | 추가 시스템 프롬프트 |
+| extraArgs | string[] | claude argv에 프롬프트 바로 앞에 전달할 추가 인자. 검증 규칙은 위 POST /jobs 참고 |
 
 **Response 200** — 업데이트된 잡 객체
 
@@ -303,6 +305,7 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
   "timeoutMs": 600000,
   "allowedTools": ["Bash", "Edit", "Read", "Write", "Glob", "Grep"],
   "appendSystemPrompt": null,
+  "extraArgs": [],
   "scheduled": true,
   "isRunning": false,
   "nextRun": "2026-02-17T00:00:00.000Z",
@@ -332,6 +335,7 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 | timeoutMs | number | 타임아웃 (ms) |
 | allowedTools | string[] | 허용된 도구 목록 |
 | appendSystemPrompt | string \| null | 추가 시스템 프롬프트 |
+| extraArgs | string[] | claude argv에 프롬프트 바로 앞에 그대로 전달되는 추가 인자 |
 | scheduled | boolean | 스케줄 활성 여부 (pause/resume으로 제어) |
 | isRunning | boolean | 현재 실행 중인지 여부 |
 | nextRun | string \| null | 다음 예정 실행 시각 (ISO 8601) |

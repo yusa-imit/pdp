@@ -25,6 +25,8 @@ export function buildClaudeArgs(job: CronJob): string[] {
     args.push("--append-system-prompt", job.appendSystemPrompt);
   }
 
+  args.push(...(job.extraArgs ?? []));
+
   args.push(job.prompt);
   return args;
 }

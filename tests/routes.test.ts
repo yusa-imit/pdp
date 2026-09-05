@@ -4,6 +4,7 @@ import {
   handleListJobs,
   handleGetJob,
   handleCreateJob,
+  handleUpdateJob,
   handleDeleteJob,
   handlePauseJob,
   handleResumeJob,
@@ -151,6 +152,63 @@ describe("POST /jobs", () => {
     expect(body.error).toContain("dailyBudgetUsd");
   });
 
+  test("returns 400 for non-array extraArgs", async () => {
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "bad-extra-args",
+        expression: "*/10 * * * *",
+        prompt: "p",
+        cwd: "/tmp",
+        extraArgs: "--debug",
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleCreateJob(ctx, req);
+    expect(res.status).toBe(400);
+    const body = await jsonBody(res);
+    expect(body.error).toContain("extraArgs");
+  });
+
+  test("returns 400 when extraArgs overrides a job-owned flag", async () => {
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "override-flag",
+        expression: "*/10 * * * *",
+        prompt: "p",
+        cwd: "/tmp",
+        extraArgs: ["--model", "opus"],
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleCreateJob(ctx, req);
+    expect(res.status).toBe(400);
+    const body = await jsonBody(res);
+    expect(body.error).toBe("extraArgs must not override job-owned flags");
+  });
+
+  test("creates a job with valid extraArgs", async () => {
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "extra-args-job",
+        expression: "*/10 * * * *",
+        prompt: "p",
+        cwd: "/tmp",
+        extraArgs: ["--debug", "--add-dir", "/tmp/x"],
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleCreateJob(ctx, req);
+    expect(res.status).toBe(201);
+    const body = await jsonBody(res);
+    expect(body.extraArgs).toEqual(["--debug", "--add-dir", "/tmp/x"]);
+  });
+
   test("returns 400 for missing fields", async () => {
     const req = new Request("http://localhost/jobs", {
       method: "POST",
@@ -179,6 +237,65 @@ describe("POST /jobs", () => {
 
     const body = await jsonBody(res);
     expect(body.error).toContain("Invalid cron expression");
+  });
+});
+
+describe("PATCH /jobs/:id", () => {
+  test("returns 400 for non-array extraArgs", async () => {
+    const job = await createJobInDB(
+      ctx,
+      { name: "patch-target", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const req = new Request(`http://localhost/jobs/${job.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ extraArgs: "not-an-array" }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleUpdateJob(ctx, job.id, req);
+    expect(res.status).toBe(400);
+    const body = await jsonBody(res);
+    expect(body.error).toContain("extraArgs");
+  });
+
+  test("returns 400 when extraArgs overrides a job-owned flag", async () => {
+    const job = await createJobInDB(
+      ctx,
+      { name: "patch-target-2", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const req = new Request(`http://localhost/jobs/${job.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ extraArgs: ["--append-system-prompt", "x"] }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleUpdateJob(ctx, job.id, req);
+    expect(res.status).toBe(400);
+    const body = await jsonBody(res);
+    expect(body.error).toBe("extraArgs must not override job-owned flags");
+  });
+
+  test("updates extraArgs with a valid array", async () => {
+    const job = await createJobInDB(
+      ctx,
+      { name: "patch-target-3", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const req = new Request(`http://localhost/jobs/${job.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ extraArgs: ["--debug"] }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const res = await handleUpdateJob(ctx, job.id, req);
+    expect(res.status).toBe(200);
+    const body = await jsonBody(res);
+    expect(body.extraArgs).toEqual(["--debug"]);
   });
 });
 

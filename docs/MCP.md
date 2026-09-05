@@ -66,6 +66,8 @@ MCP 서버는 비즈니스 로직 없이 HTTP API를 호출하는 thin client다
   timeoutMs?: number          기본: 600000 (10분)
   allowedTools?: string[]     허용 도구 목록
   appendSystemPrompt?: string 추가 시스템 프롬프트
+  extraArgs?: string[]        claude argv에 프롬프트 바로 앞에 그대로 전달할 추가 인자.
+                              job이 소유한 플래그(-p, --output-format, --model 등) 재정의 불가
 }
 출력: 생성된 잡 객체
 ```
@@ -86,6 +88,7 @@ MCP 서버는 비즈니스 로직 없이 HTTP API를 호출하는 thin client다
   timeoutMs?: number
   allowedTools?: string[]
   appendSystemPrompt?: string
+  extraArgs?: string[]        claude argv에 프롬프트 바로 앞에 그대로 전달할 추가 인자
 }
 출력: 업데이트된 잡 객체
 ```

@@ -70,6 +70,20 @@ describe("buildClaudeArgs", () => {
     const args = buildClaudeArgs(makeJob({ prompt: "my prompt" }));
     expect(args[args.length - 1]).toBe("my prompt");
   });
+
+  test("passes extraArgs through verbatim immediately before the prompt", () => {
+    const args = buildClaudeArgs(makeJob({
+      prompt: "my prompt",
+      extraArgs: ["--add-dir", "/tmp/extra", "--debug"],
+    }));
+    expect(args[args.length - 1]).toBe("my prompt");
+    expect(args.slice(-4, -1)).toEqual(["--add-dir", "/tmp/extra", "--debug"]);
+  });
+
+  test("omits extraArgs entirely when undefined", () => {
+    const args = buildClaudeArgs(makeJob({ extraArgs: undefined }));
+    expect(args[args.length - 1]).toBe("do something");
+  });
 });
 
 describe("parseClaudeJson", () => {
