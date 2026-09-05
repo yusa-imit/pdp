@@ -8,6 +8,11 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 - 포트는 환경변수 `PORT`로 변경 가능
 - 잡과 실행 이력은 DuckDB (`cron.db`)에 저장되며, 서버 재시작 시 자동 로드된다
 
+## 보안 (CSRF)
+
+- `GET`이 아닌 모든 요청은 `Origin` 또는 `Sec-Fetch-Site` 헤더를 포함하면 무조건 `403 { "error": "browser origins are not allowed" }`으로 거부된다. 두 헤더 모두 브라우저의 fetch/XHR/폼 제출이 자동으로 붙이며 페이지 스크립트가 지울 수 없는 값이라, 이 규칙은 곧 "브라우저에서 보낸 상태 변경 요청은 전부 거부"를 뜻한다. `curl`, MCP stdio 클라이언트, `jobs.py` 같은 비-브라우저 클라이언트는 두 헤더를 보내지 않으므로 영향받지 않는다.
+- 요청 본문을 읽는 라우트(`POST /jobs`, `PATCH /jobs/:id`)는 `Content-Type: application/json`이 아니면 `400`을 반환한다. 본문이 없는 액션(`/trigger`, `/pause`, `/resume`, `DELETE /jobs/:id`)은 이 검사 대상이 아니다.
+
 ---
 
 ## GET /health
@@ -65,6 +70,7 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 | timeoutMs | number | X | `600000` | 실행 타임아웃 (ms). 기본 10분 |
 | allowedTools | string[] | X | `[]` | 허용할 도구 목록. `--allowedTools`로 전달됨. 빈 배열이면 제한 없음 |
 | appendSystemPrompt | string | X | `""` | 시스템 프롬프트에 추가할 텍스트. `--append-system-prompt`로 전달됨 |
+| dailyBudgetUsd | number \| null | X | `null` | 하루(로컬 자정 기준) 누적 비용 상한(USD). 지정 시, 스케줄 실행 직전 해당 잡의 오늘 `runs.cost_usd` 합계가 이 값 이상이면 `claude`를 spawn하지 않고 `status="skipped"`, `error="daily budget reached"`인 run row만 기록하고 종료한다. `maxBudget`(`--max-budget-usd`, 세션당 상한)과는 별개이며 값은 양수여야 함(0 이하는 400) |
 | extraArgs | string[] | X | `[]` | claude argv에 프롬프트 바로 앞에 그대로(verbatim) 전달할 추가 인자. `-p`, `--print`, `--output-format`, `--model`, `--permission-mode`, `--max-budget-usd`, `--allowedTools`, `--append-system-prompt`는 job이 이미 소유한 플래그라 지정할 수 없음(400). 배열의 각 원소는 비어있지 않은 문자열이어야 하며, 마지막 원소가 값이 필요한 플래그(`--add-dir`, `--settings`, `--append-system-prompt-file`, `--effort`, `--model`)면 거부됨(프롬프트가 그 값으로 삼켜지는 것을 방지) |
 
 **cron 표현식 형식**
@@ -217,7 +223,7 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 
 잡의 스케줄을 일시정지한다. 현재 실행 중인 프로세스에는 영향 없음.
 
-**Response 200** — 잡 객체 (scheduled=false)
+**Response 200** — 잡 객체 (scheduled=false, isPaused=true)
 
 ---
 
@@ -225,7 +231,7 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 
 일시정지된 잡의 스케줄을 재개한다.
 
-**Response 200** — 잡 객체 (scheduled=true)
+**Response 200** — 잡 객체 (scheduled=true, isPaused=false)
 
 ---
 
@@ -305,8 +311,10 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
   "timeoutMs": 600000,
   "allowedTools": ["Bash", "Edit", "Read", "Write", "Glob", "Grep"],
   "appendSystemPrompt": null,
+  "dailyBudgetUsd": null,
   "extraArgs": [],
   "scheduled": true,
+  "isPaused": false,
   "isRunning": false,
   "nextRun": "2026-02-17T00:00:00.000Z",
   "lastRun": {
@@ -335,8 +343,10 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 | timeoutMs | number | 타임아웃 (ms) |
 | allowedTools | string[] | 허용된 도구 목록 |
 | appendSystemPrompt | string \| null | 추가 시스템 프롬프트 |
+| dailyBudgetUsd | number \| null | 하루 누적 비용 상한 (USD). `null`이면 무제한. 자세한 동작은 위 POST /jobs 참고 |
 | extraArgs | string[] | claude argv에 프롬프트 바로 앞에 그대로 전달되는 추가 인자 |
-| scheduled | boolean | 스케줄 활성 여부 (pause/resume으로 제어) |
+| scheduled | boolean | 스케줄 활성 여부. `!isPaused && instance가 stop되지 않음`과 동일 |
+| isPaused | boolean | pause/resume으로 제어되는 일시정지 상태. 서버 재시작 후에도 유지됨(DB에 영속) |
 | isRunning | boolean | 현재 실행 중인지 여부 |
 | nextRun | string \| null | 다음 예정 실행 시각 (ISO 8601) |
 | lastRun | object \| null | 마지막 실행 결과 (아래 참고) |
@@ -359,11 +369,12 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 ## 동작 방식
 
 1. 잡이 등록되면 cron 표현식에 따라 자동으로 스케줄링된다.
-2. 실행 시 `claude -p --permission-mode <permissionMode> --model <model> "<prompt>"` 명령이 `cwd` 디렉토리에서 실행된다.
-3. 같은 잡이 이미 실행 중이면 중복 실행을 건너뛴다 (concurrency guard).
-4. 모든 실행 결과는 DuckDB `runs` 테이블에 기록되고, 로그 파일은 `./logs/`에 보존된다.
-5. 타임아웃 초과 시 프로세스가 강제 종료된다.
-6. 실행 상태: `running` → `success` (exit 0) 또는 `failed` (exit != 0 / timeout / error)
+2. 실행 직전 동시 실행 제한(전역 `MAX_PARALLEL_JOBS`)과 `dailyBudgetUsd`(설정된 경우, 오늘 누적 `cost_usd` 합계)를 확인한다. 둘 중 하나라도 걸리면 `claude`를 spawn하지 않고 `status="skipped"` run row만 기록한다.
+3. 실행 시 `claude -p --permission-mode <permissionMode> --model <model> "<prompt>"` 명령이 자신만의 프로세스 그룹(detached)으로 `cwd` 디렉토리에서 실행된다.
+4. 같은 잡이 이미 실행 중이면 중복 실행을 건너뛴다 (concurrency guard).
+5. 모든 실행 결과는 DuckDB `runs` 테이블에 기록되고, 로그 파일은 `./logs/`에 보존된다.
+6. 타임아웃 초과 시 프로세스 그룹 전체에 SIGTERM을 보내고, 10초 내 종료되지 않으면 SIGKILL로 강제 종료한다 — `claude`가 띄운 자식 프로세스(npm 스크립트, 테스트 러너 등)까지 함께 정리되어 고아 프로세스가 남지 않는다.
+7. 실행 상태: `running` → `success` (exit 0) 또는 `failed` (exit != 0 / timeout / error) 또는 `skipped` (동시 실행 제한 / 일일 예산 초과)
 
 ---
 

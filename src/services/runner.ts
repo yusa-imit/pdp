@@ -1,7 +1,23 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
+import type { FileSink } from "bun";
 import type { AppContext, CronJob, ClaudeJsonResult } from "../types";
 import { getAllJobs } from "./scheduler";
+
+// How long to wait after a SIGTERM to the job's process group before
+// escalating to SIGKILL, and how long to wait for the stdout/stderr readers
+// to drain after a kill before giving up on them. Kept small relative to
+// job timeouts so a wedged child can't hang runJob (and the parallel-job
+// slot it occupies) indefinitely.
+const GROUP_KILL_GRACE_MS = 10_000;
+const READER_DRAIN_DEADLINE_MS = 15_000;
+
+async function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | "deadline"> {
+  return Promise.race([
+    promise,
+    new Promise<"deadline">((resolve) => setTimeout(() => resolve("deadline"), ms)),
+  ]);
+}
 
 export function buildClaudeArgs(job: CronJob): string[] {
   const args = [
@@ -115,6 +131,26 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     return;
   }
 
+  // Check daily budget
+  if (job.dailyBudgetUsd != null) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const spentRow = await ctx.db.get<{ total: number }>(
+      "SELECT COALESCE(SUM(cost_usd),0) as total FROM runs WHERE job_id = ? AND started_at >= ?",
+      job.id, todayStart.toISOString()
+    );
+    const spent = spentRow?.total ?? 0;
+    if (spent >= job.dailyBudgetUsd) {
+      const reason = "daily budget reached";
+      console.log(`[SKIP] Job "${job.name}" (id=${job.id}) — ${reason} ($${spent.toFixed(4)} >= $${job.dailyBudgetUsd})`);
+      await ctx.db.run(
+        "INSERT INTO runs (job_id, started_at, finished_at, duration_ms, status, error) VALUES (?, ?, ?, 0, 'skipped', ?)",
+        job.id, new Date().toISOString(), new Date().toISOString(), reason
+      );
+      return;
+    }
+  }
+
   job.isRunning = true;
   const startedAt = new Date();
   const timestamp = startedAt.toISOString().replace(/[:.]/g, "-");
@@ -146,10 +182,13 @@ export async function runJob(ctx: AppContext, job: CronJob) {
   let costUsd: number | null = null;
   let inputTokens: number | null = null;
   let outputTokens: number | null = null;
+  // Declared outside the try so the catch branch can always close it, even
+  // if something throws after it's opened but before the happy-path close.
+  let logSink: FileSink | undefined;
 
   try {
     const args = buildClaudeArgs(job);
-    const logSink = Bun.file(logFile).writer();
+    logSink = Bun.file(logFile).writer();
 
     const header = [
       `=== Job: ${job.name} (id=${job.id}) run=${runId} ===`,
@@ -163,11 +202,15 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     ].join("\n");
     logSink.write(header);
 
+    // Run in its own process group (detached) so a timeout can kill every
+    // descendant it spawned (npm scripts, test runners, etc.), not just the
+    // immediate `claude` process.
     const proc = Bun.spawn(args, {
       cwd: job.cwd,
       stdout: "pipe",
       stderr: "pipe",
       env: cleanJobEnv(process.env),
+      detached: true,
     });
 
     // Buffer stdout (JSON output comes at process exit)
@@ -181,8 +224,8 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     // Stream stderr to log in real-time (--verbose progress goes here)
     const stderrReader = (async () => {
       for await (const chunk of proc.stderr) {
-        logSink.write(new TextEncoder().encode(`[stderr] `));
-        logSink.write(chunk);
+        logSink!.write(new TextEncoder().encode(`[stderr] `));
+        logSink!.write(chunk);
       }
     })();
 
@@ -196,15 +239,39 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     ]);
 
     if (result.type === "timeout") {
-      proc.kill();
       error = `Timed out after ${job.timeoutMs}ms`;
       logSink.write(`\n[TIMEOUT] ${error}\n`);
       console.log(`  [TIMEOUT] ${error}`);
+
+      // Signal the whole process group, not just `proc` itself — `detached`
+      // made it the group leader, so `-pid` reaches every descendant.
+      try {
+        process.kill(-proc.pid, "SIGTERM");
+      } catch { /* group may already be gone */ }
+
+      const termResult = await withDeadline(proc.exited, GROUP_KILL_GRACE_MS);
+      if (termResult === "deadline") {
+        console.log(`  [TIMEOUT] process group ${proc.pid} still alive after SIGTERM, sending SIGKILL`);
+        try {
+          process.kill(-proc.pid, "SIGKILL");
+        } catch { /* group may already be gone */ }
+        await withDeadline(proc.exited, GROUP_KILL_GRACE_MS);
+      }
     } else {
       exitCode = result.code;
     }
 
-    await Promise.allSettled([stdoutReader, stderrReader]);
+    // Guard against a wedged reader (e.g. a grandchild that inherited the
+    // pipe fd and is still holding it open post-kill) so a bad job can't
+    // hang runJob — and the parallel-job slot it holds — forever.
+    const readersResult = await withDeadline(
+      Promise.allSettled([stdoutReader, stderrReader]),
+      READER_DRAIN_DEADLINE_MS
+    );
+    if (readersResult === "deadline") {
+      logSink.write(`\n[WARN] stdout/stderr did not drain within ${READER_DRAIN_DEADLINE_MS}ms, giving up\n`);
+      console.log(`  [WARN] stdout/stderr readers for run=${runId} did not drain in time`);
+    }
 
     // Parse JSON stdout
     const stdoutBuf = Buffer.concat(stdoutChunks);
@@ -227,6 +294,11 @@ export async function runJob(ctx: AppContext, job: CronJob) {
   } catch (err) {
     error = String(err);
     console.error(`  [ERROR] ${error}`);
+    // Make sure the log file handle isn't leaked when something throws
+    // before the happy-path logSink.end() above runs.
+    try {
+      logSink?.end();
+    } catch { /* already closed or never opened */ }
   }
 
   const finishedAt = new Date();

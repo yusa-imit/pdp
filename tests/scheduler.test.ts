@@ -211,12 +211,27 @@ describe("jobToJSON", () => {
     expect(data.id).toBe(job.id);
     expect(data.name).toBe("json-test");
     expect(data.scheduled).toBe(true);
+    expect(data.isPaused).toBe(false);
     expect(data.isRunning).toBe(false);
     expect(data.lastRun).toBeNull();
     expect(data.runCount).toBe(0);
     expect(data.nextRun).toBeDefined();
     expect(data.sessionLimitThreshold).toBe(90);
     expect(data.dailyBudgetUsd).toBeNull();
+  });
+
+  test("reflects isPaused after pauseJob", async () => {
+    const job = await createJobInDB(
+      ctx,
+      { name: "json-test-paused", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    await pauseJob(ctx, job);
+    const data = await jobToJSON(ctx, job);
+
+    expect(data.isPaused).toBe(true);
+    expect(data.scheduled).toBe(false);
   });
 
   test("serializes job with a run including cost data", async () => {

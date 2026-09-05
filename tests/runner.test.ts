@@ -4,6 +4,9 @@ import { scheduleJob } from "../src/services/scheduler";
 import type { AppContext, CronJob } from "../src/types";
 import { Cron } from "croner";
 import { createTestContext } from "./helpers";
+import { mkdtemp, chmod } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function makeJob(overrides: Partial<CronJob> = {}): CronJob {
   return {
@@ -202,4 +205,146 @@ describe("runJob parallel limit", () => {
     expect(runs[0].status).toBe("skipped");
     expect(runs[0].error).toContain("Parallel limit reached");
   });
+});
+
+describe("runJob daily budget", () => {
+  let ctx: AppContext;
+
+  afterEach(async () => {
+    if (ctx) {
+      for (const job of ctx.jobs.values()) job.instance.stop();
+      await ctx.db.close();
+    }
+  });
+
+  test("skips without spawning once today's spend reaches the budget", async () => {
+    ctx = await createTestContext();
+    const job = makeJob({ id: 5, name: "budgeted", dailyBudgetUsd: 1 });
+    scheduleJob(ctx, job);
+
+    // Prior runs today already spent $1.20, over the $1 daily budget.
+    await ctx.db.run(
+      "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
+      job.id, new Date().toISOString(), 0.7
+    );
+    await ctx.db.run(
+      "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
+      job.id, new Date().toISOString(), 0.5
+    );
+
+    await runJob(ctx, job);
+
+    // Job should not have run (no spawn attempted, isRunning left false).
+    expect(job.isRunning).toBe(false);
+
+    // Order by id (not started_at) — the seed rows and the skip row can
+    // share the same millisecond timestamp, making started_at DESC ordering
+    // nondeterministic between ties.
+    const runs = await ctx.db.all<{ status: string; error: string }>(
+      "SELECT status, error FROM runs WHERE job_id = ? ORDER BY id DESC", job.id
+    );
+    expect(runs[0]?.status).toBe("skipped");
+    expect(runs[0]?.error).toBe("daily budget reached");
+    // Only the 2 seed rows plus the new skipped row — nothing was spawned.
+    expect(runs).toHaveLength(3);
+  });
+
+  test("does not count yesterday's spend against today's budget", async () => {
+    ctx = await createTestContext();
+    const job = makeJob({ id: 6, name: "budgeted-2", dailyBudgetUsd: 1, cwd: "/nonexistent-dir-xyz" });
+    scheduleJob(ctx, job);
+
+    const yesterday = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await ctx.db.run(
+      "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
+      job.id, yesterday.toISOString(), 5.0
+    );
+
+    await runJob(ctx, job);
+
+    // Old spend doesn't count, so the job proceeds to spawn (and fails fast
+    // because cwd doesn't exist) instead of being skipped for budget.
+    const runs = await ctx.db.all<{ status: string; error: string }>(
+      "SELECT status, error FROM runs WHERE job_id = ? AND error != 'daily budget reached'", job.id
+    );
+    expect(runs).toHaveLength(1);
+  });
+
+  test("runs normally when dailyBudgetUsd is null", async () => {
+    ctx = await createTestContext();
+    const job = makeJob({ id: 7, name: "unbudgeted", dailyBudgetUsd: null, cwd: "/nonexistent-dir-xyz" });
+    scheduleJob(ctx, job);
+
+    await ctx.db.run(
+      "INSERT INTO runs (job_id, started_at, status, cost_usd) VALUES (?, ?, 'success', ?)",
+      job.id, new Date().toISOString(), 999
+    );
+
+    await runJob(ctx, job);
+
+    const runs = await ctx.db.all<{ error: string }>(
+      "SELECT error FROM runs WHERE job_id = ?", job.id
+    );
+    // The seed row plus one attempted (and failed, bad cwd) run — never skipped for budget.
+    expect(runs.some((r) => r.error === "daily budget reached")).toBe(false);
+  });
+});
+
+describe("runJob process group kill on timeout", () => {
+  let ctx: AppContext;
+  let binDir: string;
+  const origPath = process.env.PATH;
+
+  afterEach(async () => {
+    process.env.PATH = origPath;
+    if (ctx) {
+      for (const job of ctx.jobs.values()) job.instance.stop();
+      await ctx.db.close();
+    }
+  });
+
+  test("SIGTERMs the whole process group, killing grandchildren too", async () => {
+    ctx = await createTestContext();
+    binDir = await mkdtemp(join(tmpdir(), "cron-fake-claude-"));
+    const pidFile = join(binDir, "grandchild.pid");
+    // Write the grandchild's pid straight to a file rather than stdout — a
+    // pipe read is timing-sensitive against the (short, deliberately-hit)
+    // job timeout, whereas the file is written the instant the grandchild
+    // is backgrounded, well before `wait` blocks on it.
+    const script = [
+      "#!/bin/bash",
+      "sleep 30 &",
+      `echo -n $! > "${pidFile}"`,
+      "wait",
+      "",
+    ].join("\n");
+    const scriptPath = join(binDir, "claude");
+    await Bun.write(scriptPath, script);
+    await chmod(scriptPath, 0o755);
+
+    process.env.PATH = `${binDir}:${origPath}`;
+
+    // Generous relative to how fast bash forks+writes the pidfile (a few ms)
+    // so the test isn't flaky under load, while still completing quickly.
+    const job = makeJob({ id: 8, name: "hangs", timeoutMs: 1000 });
+    scheduleJob(ctx, job);
+
+    await runJob(ctx, job);
+
+    const runRow = await ctx.db.get<{ error: string; log_file: string; status: string }>(
+      "SELECT error, log_file, status FROM runs WHERE job_id = ?", job.id
+    );
+    expect(runRow?.status).toBe("failed");
+    expect(runRow?.error).toContain("Timed out");
+
+    const grandchildPid = (await Bun.file(pidFile).text()).trim();
+    expect(grandchildPid).toMatch(/^\d+$/);
+
+    // The grandchild (spawned by the fake `claude` script, inherited into
+    // the same process group) must have been killed along with it — not
+    // left running as an orphan.
+    const psResult = Bun.spawnSync(["ps", "-p", grandchildPid!]);
+    const psOutput = new TextDecoder().decode(psResult.stdout);
+    expect(psOutput).not.toContain(grandchildPid);
+  }, 5000);
 });

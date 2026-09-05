@@ -11,6 +11,7 @@ import {
   handleTriggerJob,
 } from "../src/routes/jobs";
 import { handleGetRuns } from "../src/routes/runs";
+import { createRequestHandler } from "../src/server";
 import type { AppContext } from "../src/types";
 import { createTestContext } from "./helpers";
 import { createJobInDB } from "../src/services/scheduler";
@@ -447,5 +448,125 @@ describe("GET /jobs/:id/runs", () => {
     expect(body.runs[0].costUsd).toBeDefined();
     expect(body.runs[0].inputTokens).toBeDefined();
     expect(body.runs[0].outputTokens).toBeDefined();
+  });
+});
+
+describe("browser-origin CSRF rejection", () => {
+  test("rejects a non-GET request carrying an Origin header", async () => {
+    const handler = createRequestHandler(ctx);
+    const req = new Request("http://localhost/jobs/1/trigger", {
+      method: "POST",
+      headers: { Origin: "http://localhost:3000" },
+    });
+
+    const res = await handler(req);
+    expect(res.status).toBe(403);
+    const body = await jsonBody(res);
+    expect(body.error).toBe("browser origins are not allowed");
+  });
+
+  test("rejects a non-GET request carrying a Sec-Fetch-Site header", async () => {
+    const handler = createRequestHandler(ctx);
+    const req = new Request("http://localhost/jobs/1/pause", {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+
+    const res = await handler(req);
+    expect(res.status).toBe(403);
+  });
+
+  test("allows a non-GET request with neither header (curl/MCP-style)", async () => {
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "csrf-ok", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const req = new Request(`http://localhost/jobs/${job.id}/pause`, { method: "POST" });
+    const res = await handler(req);
+    expect(res.status).toBe(200);
+  });
+
+  test("allows a GET request even with an Origin header", async () => {
+    const handler = createRequestHandler(ctx);
+    const req = new Request("http://localhost/health", {
+      headers: { Origin: "http://localhost:3000" },
+    });
+
+    const res = await handler(req);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("Content-Type enforcement on POST/PATCH bodies", () => {
+  test("rejects POST /jobs without Content-Type: application/json", async () => {
+    const handler = createRequestHandler(ctx);
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({ name: "no-ct", expression: "0 * * * *", prompt: "p", cwd: "/tmp" }),
+    });
+
+    const res = await handler(req);
+    expect(res.status).toBe(400);
+    const body = await jsonBody(res);
+    expect(body.error).toContain("Content-Type");
+  });
+
+  test("rejects PATCH /jobs/:id with a non-JSON Content-Type", async () => {
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "patch-no-ct", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const req = new Request(`http://localhost/jobs/${job.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: "renamed" }),
+      headers: { "Content-Type": "text/plain" },
+    });
+
+    const res = await handler(req);
+    expect(res.status).toBe(400);
+  });
+
+  test("accepts POST /jobs with a Content-Type that includes a charset param", async () => {
+    const handler = createRequestHandler(ctx);
+    const req = new Request("http://localhost/jobs", {
+      method: "POST",
+      body: JSON.stringify({ name: "charset-ok", expression: "0 * * * *", prompt: "p", cwd: "/tmp" }),
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+
+    const res = await handler(req);
+    expect(res.status).toBe(201);
+  });
+
+  test("does not require Content-Type on bodyless POST actions (pause/resume)", async () => {
+    // Deliberately exercises /pause rather than /trigger — trigger would
+    // fire a real (unawaited) `claude` process spawn from this test.
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "no-body-action", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const res = await handler(new Request(`http://localhost/jobs/${job.id}/pause`, { method: "POST" }));
+    expect(res.status).toBe(200);
+  });
+
+  test("does not require Content-Type on DELETE /jobs/:id", async () => {
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "delete-no-ct", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const res = await handler(new Request(`http://localhost/jobs/${job.id}`, { method: "DELETE" }));
+    expect(res.status).toBe(200);
   });
 });

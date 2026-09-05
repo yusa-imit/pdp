@@ -68,6 +68,7 @@ export async function jobToJSON(ctx: AppContext, job: CronJob) {
     blockTokenLimit: job.blockTokenLimit,
     extraArgs: job.extraArgs ?? [],
     scheduled: !job.instance.isStopped() && !job.isPaused,
+    isPaused: job.isPaused,
     isRunning: job.isRunning,
     nextRun: job.instance.nextRun()?.toISOString() ?? null,
     lastRun: lastRun
