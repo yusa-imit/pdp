@@ -17,12 +17,36 @@ import type { AppContext } from "./types";
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "127.0.0.1";
 
-// Reject browser-originated state-changing requests (CSRF hardening).
+// Reject cross-site state-changing requests (CSRF hardening).
 // Browsers attach `Origin` and/or `Sec-Fetch-Site` to non-GET fetch/XHR/form
 // requests automatically and a page can never suppress them; curl, the MCP
-// stdio client, and jobs.py never send either header.
-function isBrowserRequest(req: Request): boolean {
-  return req.headers.has("origin") || req.headers.has("sec-fetch-site");
+// stdio client, and jobs.py never send either header, so they're unaffected.
+//
+// Same-origin requests must be let through — the server's own htmx dashboard
+// (src/views/dashboard.ts) issues hx-post trigger/pause/resume calls against
+// itself, which carry `Sec-Fetch-Site: same-origin` (and/or a same-origin
+// `Origin`). Only requests that are actually cross-site get rejected.
+function isCrossSiteRequest(req: Request): boolean {
+  const secFetchSite = req.headers.get("sec-fetch-site");
+  if (secFetchSite === "same-origin" || secFetchSite === "none") {
+    return false;
+  }
+
+  const origin = req.headers.get("origin");
+  if (origin !== null) {
+    const host = req.headers.get("host");
+    if (host !== null && origin === `http://${host}`) {
+      return false;
+    }
+  }
+
+  // Neither header present at all — non-browser client (curl, MCP stdio,
+  // jobs.py). Nothing to compare against, so let it through.
+  if (secFetchSite === null && origin === null) {
+    return false;
+  }
+
+  return true;
 }
 
 // The only two routes that read a JSON body from the request.
@@ -36,6 +60,16 @@ function isJsonContentType(req: Request): boolean {
   return contentType.split(";")[0]!.trim().toLowerCase() === "application/json";
 }
 
+// Optional bearer-token gate. Off by default (CRON_TOKEN unset) so existing
+// deployments and the MCP/curl workflow keep working untouched; the operator
+// opts in by setting CRON_TOKEN in the environment (never via this repo's
+// plist — see docs/API.md).
+function isAuthorized(req: Request): boolean {
+  const token = process.env.CRON_TOKEN;
+  if (!token) return true;
+  return req.headers.get("authorization") === `Bearer ${token}`;
+}
+
 // Extracted from startServer so tests can exercise the full routing +
 // security-middleware behavior without binding a real port.
 export function createRequestHandler(ctx: AppContext) {
@@ -44,8 +78,12 @@ export function createRequestHandler(ctx: AppContext) {
     const { pathname } = url;
     const method = req.method;
 
-    if (method !== "GET" && isBrowserRequest(req)) {
-      return json({ error: "browser origins are not allowed" }, 403);
+    if (method !== "GET" && !isAuthorized(req)) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    if (method !== "GET" && isCrossSiteRequest(req)) {
+      return json({ error: "cross-site requests are not allowed" }, 403);
     }
 
     if (isJsonBodyRoute(method, pathname) && !isJsonContentType(req)) {
