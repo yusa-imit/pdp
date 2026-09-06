@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import type { FileSink } from "bun";
 import type { AppContext, CronJob, ClaudeJsonResult } from "../types";
 import { getAllJobs } from "./scheduler";
+import { notify } from "./notify";
 
 // How long to wait after a SIGTERM to the job's process group before
 // escalating to SIGKILL, and how long to wait for the stdout/stderr readers
@@ -128,6 +129,8 @@ export async function runJob(ctx: AppContext, job: CronJob) {
       "INSERT INTO runs (job_id, started_at, finished_at, duration_ms, status, error) VALUES (?, ?, ?, 0, 'skipped', ?)",
       job.id, new Date().toISOString(), new Date().toISOString(), reason
     );
+    const skipRun = await ctx.db.get<{ id: number }>("SELECT max(id) as id FROM runs WHERE job_id = ?", job.id);
+    notify(`[cron] ${job.name} skipped run=${skipRun!.id} ${reason}`);
     return;
   }
 
@@ -147,6 +150,8 @@ export async function runJob(ctx: AppContext, job: CronJob) {
         "INSERT INTO runs (job_id, started_at, finished_at, duration_ms, status, error) VALUES (?, ?, ?, 0, 'skipped', ?)",
         job.id, new Date().toISOString(), new Date().toISOString(), reason
       );
+      const skipRun = await ctx.db.get<{ id: number }>("SELECT max(id) as id FROM runs WHERE job_id = ?", job.id);
+      notify(`[cron] ${job.name} skipped run=${skipRun!.id} ${reason}`);
       return;
     }
   }
@@ -182,6 +187,7 @@ export async function runJob(ctx: AppContext, job: CronJob) {
   let costUsd: number | null = null;
   let inputTokens: number | null = null;
   let outputTokens: number | null = null;
+  let wasTimeout = false;
   // Declared outside the try so the catch branch can always close it, even
   // if something throws after it's opened but before the happy-path close.
   let logSink: FileSink | undefined;
@@ -239,6 +245,7 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     ]);
 
     if (result.type === "timeout") {
+      wasTimeout = true;
       error = `Timed out after ${job.timeoutMs}ms`;
       logSink.write(`\n[TIMEOUT] ${error}\n`);
       console.log(`  [TIMEOUT] ${error}`);
@@ -305,6 +312,17 @@ export async function runJob(ctx: AppContext, job: CronJob) {
   const durationMs = finishedAt.getTime() - startedAt.getTime();
   const status = error ? "failed" : exitCode === 0 ? "success" : "failed";
 
+  // A failed/timed-out run with no cost parsed from stdout would otherwise
+  // record cost_usd NULL, and SUM(cost_usd) silently ignores NULL rows —
+  // letting a job that burns real API spend before dying escape the daily
+  // budget gate entirely. Charge conservatively against the job's own
+  // session cap so at least one more bad run trips the budget check.
+  if (status === "failed" && costUsd === null) {
+    costUsd = job.maxBudget ?? 0;
+    const note = `cost unknown; charged conservative estimate of $${costUsd.toFixed(2)} against daily budget`;
+    error = error ? `${error} (${note})` : note;
+  }
+
   await ctx.db.run(
     `UPDATE runs SET finished_at = ?, exit_code = ?, duration_ms = ?, error = ?, status = ?, cost_usd = ?, input_tokens = ?, output_tokens = ? WHERE id = ?`,
     finishedAt.toISOString(), exitCode, durationMs, error, status, costUsd, inputTokens, outputTokens, runId
@@ -314,4 +332,12 @@ export async function runJob(ctx: AppContext, job: CronJob) {
 
   job.isRunning = false;
   console.log(`[DONE] Job "${job.name}" (id=${job.id}) run=${runId} status=${status} duration=${durationMs}ms`);
+
+  if (status === "failed") {
+    if (wasTimeout) {
+      notify(`[cron] ${job.name} timeout run=${runId} ${durationMs}ms`);
+    } else {
+      notify(`[cron] ${job.name} failed run=${runId} ${error ?? `exit code ${exitCode}`}`);
+    }
+  }
 }

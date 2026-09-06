@@ -451,29 +451,61 @@ describe("GET /jobs/:id/runs", () => {
   });
 });
 
-describe("browser-origin CSRF rejection", () => {
-  test("rejects a non-GET request carrying an Origin header", async () => {
+describe("cross-site CSRF rejection", () => {
+  test("rejects a cross-site request signaled by Sec-Fetch-Site", async () => {
     const handler = createRequestHandler(ctx);
     const req = new Request("http://localhost/jobs/1/trigger", {
       method: "POST",
-      headers: { Origin: "http://localhost:3000" },
+      headers: { "Sec-Fetch-Site": "cross-site" },
     });
 
     const res = await handler(req);
     expect(res.status).toBe(403);
     const body = await jsonBody(res);
-    expect(body.error).toBe("browser origins are not allowed");
+    expect(body.error).toBe("cross-site requests are not allowed");
   });
 
-  test("rejects a non-GET request carrying a Sec-Fetch-Site header", async () => {
+  test("rejects a non-GET request whose Origin doesn't match the Host", async () => {
     const handler = createRequestHandler(ctx);
     const req = new Request("http://localhost/jobs/1/pause", {
       method: "POST",
-      headers: { "Sec-Fetch-Site": "same-origin" },
+      headers: { Origin: "http://evil.example", Host: "localhost" },
     });
 
     const res = await handler(req);
     expect(res.status).toBe(403);
+  });
+
+  test("allows a same-origin request signaled by Sec-Fetch-Site (htmx dashboard buttons)", async () => {
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "csrf-same-origin", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const req = new Request(`http://localhost/jobs/${job.id}/pause`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", Origin: "http://localhost", Host: "localhost" },
+    });
+    const res = await handler(req);
+    expect(res.status).toBe(200);
+  });
+
+  test("allows a request whose Origin matches the Host", async () => {
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "csrf-origin-match", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const req = new Request(`http://localhost/jobs/${job.id}/resume`, {
+      method: "POST",
+      headers: { Origin: "http://localhost", Host: "localhost" },
+    });
+    const res = await handler(req);
+    expect(res.status).toBe(200);
   });
 
   test("allows a non-GET request with neither header (curl/MCP-style)", async () => {
@@ -489,13 +521,73 @@ describe("browser-origin CSRF rejection", () => {
     expect(res.status).toBe(200);
   });
 
-  test("allows a GET request even with an Origin header", async () => {
+  test("allows a GET request even with a cross-site Origin header", async () => {
     const handler = createRequestHandler(ctx);
     const req = new Request("http://localhost/health", {
-      headers: { Origin: "http://localhost:3000" },
+      headers: { Origin: "http://evil.example" },
     });
 
     const res = await handler(req);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("optional bearer token (CRON_TOKEN)", () => {
+  const originalToken = process.env.CRON_TOKEN;
+
+  afterEach(() => {
+    if (originalToken === undefined) delete process.env.CRON_TOKEN;
+    else process.env.CRON_TOKEN = originalToken;
+  });
+
+  test("rejects a non-GET request missing the bearer token when CRON_TOKEN is set", async () => {
+    process.env.CRON_TOKEN = "secret-token";
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "needs-token", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const res = await handler(new Request(`http://localhost/jobs/${job.id}/pause`, { method: "POST" }));
+    expect(res.status).toBe(401);
+    const body = await jsonBody(res);
+    expect(body.error).toBe("unauthorized");
+  });
+
+  test("allows a non-GET request carrying the correct bearer token", async () => {
+    process.env.CRON_TOKEN = "secret-token";
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "has-token", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const res = await handler(new Request(`http://localhost/jobs/${job.id}/pause`, {
+      method: "POST",
+      headers: { Authorization: "Bearer secret-token" },
+    }));
+    expect(res.status).toBe(200);
+  });
+
+  test("GET stays open even when CRON_TOKEN is set and no header is sent", async () => {
+    process.env.CRON_TOKEN = "secret-token";
+    const handler = createRequestHandler(ctx);
+    const res = await handler(new Request("http://localhost/health"));
+    expect(res.status).toBe(200);
+  });
+
+  test("does not require the token when CRON_TOKEN is unset", async () => {
+    delete process.env.CRON_TOKEN;
+    const handler = createRequestHandler(ctx);
+    const job = await createJobInDB(
+      ctx,
+      { name: "no-token-needed", expression: "0 * * * *", prompt: "p", cwd: "/tmp" },
+      defaultOpts
+    );
+
+    const res = await handler(new Request(`http://localhost/jobs/${job.id}/pause`, { method: "POST" }));
     expect(res.status).toBe(200);
   });
 });

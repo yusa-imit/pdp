@@ -7,10 +7,13 @@ const BASE_URL = process.env.CRON_SERVER_URL || "http://localhost:3000";
 // --- HTTP client ---
 
 async function api<T = unknown>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...opts,
-    headers: { "Content-Type": "application/json", ...opts?.headers },
-  });
+  const token = process.env.CRON_TOKEN;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(opts?.headers as Record<string, string> | undefined),
+  };
+  const res = await fetch(`${BASE_URL}${path}`, { ...opts, headers });
   if (res.headers.get("content-type")?.includes("text/plain")) {
     return (await res.text()) as unknown as T;
   }
