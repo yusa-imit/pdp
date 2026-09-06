@@ -38,6 +38,18 @@ const { createDb } = await import("./db");
 const db = createDb(DB_PATH);
 await db.init();
 
+// Graceful shutdown: closing DuckDB checkpoints the WAL, so a restart never has to replay it.
+let shuttingDown = false;
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[shutdown] ${sig}: checkpointing and closing the database`);
+    try { await db.checkpoint(); await db.close(); } catch (e) { console.error(`[shutdown] ${String(e)}`); }
+    process.exit(0);
+  });
+}
+
 const ctx: AppContext = {
   db,
   jobs: new Map(),

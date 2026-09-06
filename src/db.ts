@@ -6,6 +6,7 @@ export interface Db {
   get<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T | undefined>;
   init(): Promise<void>;
   close(): Promise<void>;
+  checkpoint(): Promise<void>;
 }
 
 export function createDb(dbPath: string): Db {
@@ -96,6 +97,10 @@ export function createDb(dbPath: string): Db {
         }
       }
     }
+    // Fold schema changes into the base file: DuckDB 1.4.x cannot replay an un-checkpointed
+    // `ALTER TABLE ... ADD COLUMN ... DEFAULT` from the WAL (assertion in ReplayAlter), which took
+    // the server down on 2026-09-06. A checkpoint right after migrations keeps the WAL free of it.
+    try { await run("CHECKPOINT"); } catch (e) { console.error(`[db] checkpoint after migrations failed: ${String(e)}`); }
   }
 
   function close(): Promise<void> {
@@ -104,5 +109,9 @@ export function createDb(dbPath: string): Db {
     });
   }
 
-  return { run, all, get, init, close };
+  async function checkpoint(): Promise<void> {
+    try { await run("CHECKPOINT"); } catch (e) { console.error(`[db] checkpoint failed: ${String(e)}`); }
+  }
+
+  return { run, all, get, init, close, checkpoint };
 }
