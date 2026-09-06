@@ -327,8 +327,8 @@ export async function runJob(ctx: AppContext, job: CronJob) {
     `UPDATE runs SET finished_at = ?, exit_code = ?, duration_ms = ?, error = ?, status = ?, cost_usd = ?, input_tokens = ?, output_tokens = ? WHERE id = ?`,
     finishedAt.toISOString(), exitCode, durationMs, error, status, costUsd, inputTokens, outputTokens, runId
   );
-    // Keep the WAL small so a crash never replays much (and never replays a schema change).
-    await ctx.db.checkpoint?.();
+  // Keep the WAL small so a crash never replays much (and never replays a schema change).
+  await ctx.db.checkpoint?.();
 
   job.isRunning = false;
   console.log(`[DONE] Job "${job.name}" (id=${job.id}) run=${runId} status=${status} duration=${durationMs}ms`);

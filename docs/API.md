@@ -10,8 +10,32 @@ Claude Code 개발 프로세스를 스케줄링하고 실행하는 HTTP API 서�
 
 ## 보안 (CSRF)
 
-- `GET`이 아닌 모든 요청은 `Origin` 또는 `Sec-Fetch-Site` 헤더를 포함하면 무조건 `403 { "error": "browser origins are not allowed" }`으로 거부된다. 두 헤더 모두 브라우저의 fetch/XHR/폼 제출이 자동으로 붙이며 페이지 스크립트가 지울 수 없는 값이라, 이 규칙은 곧 "브라우저에서 보낸 상태 변경 요청은 전부 거부"를 뜻한다. `curl`, MCP stdio 클라이언트, `jobs.py` 같은 비-브라우저 클라이언트는 두 헤더를 보내지 않으므로 영향받지 않는다.
+- `GET`이 아닌 요청 중 **크로스사이트** 요청만 `403 { "error": "cross-site requests are not allowed" }`으로 거부된다. 판정 기준:
+  - `Sec-Fetch-Site: same-origin` 또는 `none`이면 허용(same-site로 간주).
+  - 그 외의 경우 `Origin` 헤더가 있으면 `Host` 헤더로부터 유도한 서버 자신의 origin(`http://<Host>`)과 비교해 같으면 허용.
+  - `Sec-Fetch-Site`와 `Origin`이 둘 다 없으면(브라우저가 아닌 클라이언트 — `curl`, MCP stdio 클라이언트, `jobs.py`) 비교할 대상이 없으므로 허용.
+  - 그 외(`Sec-Fetch-Site: cross-site`거나 `Origin`이 서버 자신의 origin과 다름)는 거부.
+  - 대시보드(`src/views/dashboard.ts`)의 htmx `hx-post` trigger/pause/resume 버튼은 같은 오리진에서 오는 fetch라 브라우저가 자동으로 `Sec-Fetch-Site: same-origin`을 붙이므로 항상 통과한다.
 - 요청 본문을 읽는 라우트(`POST /jobs`, `PATCH /jobs/:id`)는 `Content-Type: application/json`이 아니면 `400`을 반환한다. 본문이 없는 액션(`/trigger`, `/pause`, `/resume`, `DELETE /jobs/:id`)은 이 검사 대상이 아니다.
+
+## 보안 (선택적 Bearer 토큰)
+
+- 환경변수 `CRON_TOKEN`이 설정된 경우에만 활성화된다. 기본값(미설정)에서는 아무 영향이 없다.
+- `CRON_TOKEN`이 설정되면 `GET`이 아닌 모든 요청은 `Authorization: Bearer <CRON_TOKEN>` 헤더를 정확히 포함해야 한다. 없거나 틀리면 `401 { "error": "unauthorized" }`.
+- `GET` 요청(대시보드, `/health`, `/jobs`, `/jobs/:id/runs` 등 조회)은 `CRON_TOKEN` 설정 여부와 무관하게 항상 열려 있다.
+- `src/mcp.ts`의 HTTP 클라이언트는 같은 `CRON_TOKEN` 환경변수를 읽어 모든 요청에 `Authorization: Bearer <token>`을 자동으로 붙인다 — MCP 서버와 cron 서버를 같은 값의 `CRON_TOKEN`으로 실행하면 별도 설정 없이 동작한다.
+- 운영 중인 LaunchAgent plist(`com.fn.cron-server.plist`)에는 `CRON_TOKEN`을 넣지 않는다(비활성 상태 유지). 활성화하려면 운영자가 직접 환경에 설정한다.
+
+## 알림 (Discord)
+
+- 환경변수 `OPENCLAW_DISCORD_TARGET`이 설정된 경우에만 잡 생명주기 이벤트(동시 실행 제한으로 인한 skip, 일일 예산 초과로 인한 skip, 실패, 타임아웃)에 대해 `openclaw message send --channel discord --target $OPENCLAW_DISCORD_TARGET --message <text>`를 fire-and-forget으로 실행해 Discord DM을 보낸다(`src/services/notify.ts`). 메시지 형식: `[cron] <job이름> <status> run=<run id> <reason 또는 duration>`.
+- 미설정 시 완전히 no-op — 알림 기능이 꺼진 상태로 동작한다.
+- `openclaw` 프로세스는 10초 타임아웃 후 강제 종료되며, `notify()`는 절대 `await`되지 않으므로 알림 전송이 느리거나 멈춰도 run의 기록이나 동시 실행 슬롯 해제를 막지 않는다.
+
+## DuckDB 체크포인트
+
+- 서버는 다음 세 시점에 `CHECKPOINT`를 실행해 WAL(Write-Ahead Log)을 베이스 파일에 반영한다: (1) 시작 시 스키마 마이그레이션 직후, (2) 잡 실행이 끝날 때마다(성공/실패/타임아웃 모두), (3) `SIGTERM`/`SIGINT`로 종료할 때(DB `close()` 직전).
+- 이렇게 하면 비정상 종료(kill -9, 정전 등) 후 재시작 시 replay해야 할 WAL이 거의 없어 재시작이 빠르고, DuckDB 1.4.x에서 체크포인트되지 않은 스키마 변경을 재생하다 죽는 문제도 피할 수 있다.
 
 ---
 

@@ -290,6 +290,47 @@ describe("runJob daily budget", () => {
   });
 });
 
+describe("runJob cost fallback for failed/timeout runs with no parsed cost", () => {
+  let ctx: AppContext;
+
+  afterEach(async () => {
+    if (ctx) {
+      for (const job of ctx.jobs.values()) job.instance.stop();
+      await ctx.db.close();
+    }
+  });
+
+  test("charges job.maxBudget against a failed run when no cost was parsed", async () => {
+    ctx = await createTestContext();
+    // Bad cwd makes Bun.spawn throw synchronously, so the run fails before
+    // any stdout is ever produced — costUsd stays null off the happy path.
+    const job = makeJob({ id: 20, name: "no-cost-fail", cwd: "/nonexistent-dir-xyz", maxBudget: 2.5 });
+    scheduleJob(ctx, job);
+
+    await runJob(ctx, job);
+
+    const run = await ctx.db.get<{ status: string; cost_usd: number }>(
+      "SELECT status, cost_usd FROM runs WHERE job_id = ?", job.id
+    );
+    expect(run?.status).toBe("failed");
+    expect(run?.cost_usd).toBe(2.5);
+  });
+
+  test("charges $0 against a failed run when maxBudget is unset", async () => {
+    ctx = await createTestContext();
+    const job = makeJob({ id: 21, name: "no-cost-fail-nobudget", cwd: "/nonexistent-dir-xyz", maxBudget: null });
+    scheduleJob(ctx, job);
+
+    await runJob(ctx, job);
+
+    const run = await ctx.db.get<{ status: string; cost_usd: number }>(
+      "SELECT status, cost_usd FROM runs WHERE job_id = ?", job.id
+    );
+    expect(run?.status).toBe("failed");
+    expect(run?.cost_usd).toBe(0);
+  });
+});
+
 describe("runJob process group kill on timeout", () => {
   let ctx: AppContext;
   let binDir: string;

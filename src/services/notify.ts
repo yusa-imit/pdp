@@ -16,7 +16,12 @@ export async function notify(text: string): Promise<void> {
   try {
     const proc = Bun.spawn(
       ["openclaw", "message", "send", "--channel", "discord", "--target", target, "--message", text],
-      { stdout: "ignore", stderr: "ignore" }
+      // Explicit env is required: without it, Bun resolves the "openclaw"
+      // executable against the PATH snapshot taken at process startup rather
+      // than the live process.env.PATH, so a runtime PATH change (as in
+      // notify.test.ts, and in principle any PATH edit made after boot)
+      // would silently miss the intended binary.
+      { stdout: "ignore", stderr: "ignore", env: process.env }
     );
 
     let timedOut = false;
